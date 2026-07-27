@@ -1,5 +1,17 @@
 # @likec4/diagram
 
+## 1.59.3
+
+### Patch Changes
+
+- [#3155](https://github.com/likec4/likec4/pull/3155) [`ecae4b2`](https://github.com/likec4/likec4/commit/ecae4b28259040be97f17041ebcf6ce535fc5fe4) Thanks [@ckeller42](https://github.com/ckeller42)! - Render custom SVG icons reliably in relationship views and allow local SVG icons that use `currentColor` to follow `iconColor`.
+
+- [#3154](https://github.com/likec4/likec4/pull/3154) [`6546da5`](https://github.com/likec4/likec4/commit/6546da5b8f5e96ee2d73d6254e5fa8d8c0a63ec4) Thanks [@ckeller42](https://github.com/ckeller42)! - Preserve original colors for non-Bootstrap diagram icons, including bundled brand, cloud provider, and image-based icons. Fixes [#3153](https://github.com/likec4/likec4/issues/3153).
+
+- Updated dependencies [[`0888635`](https://github.com/likec4/likec4/commit/0888635f3269978599d0fd724529f876332b362c), [`dc7eba2`](https://github.com/likec4/likec4/commit/dc7eba24559706f2e41ee5f8bfd66e79363de435), [`6546da5`](https://github.com/likec4/likec4/commit/6546da5b8f5e96ee2d73d6254e5fa8d8c0a63ec4)]:
+  - @likec4/core@1.59.3
+  - @likec4/styles@1.59.3
+
 ## 1.59.2
 
 ### Patch Changes

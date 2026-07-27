@@ -1,5 +1,20 @@
 # @likec4/vite-plugin
 
+## 1.59.3
+
+### Patch Changes
+
+- [#3155](https://github.com/likec4/likec4/pull/3155) [`ecae4b2`](https://github.com/likec4/likec4/commit/ecae4b28259040be97f17041ebcf6ce535fc5fe4) Thanks [@ckeller42](https://github.com/ckeller42)! - Render custom SVG icons reliably in relationship views and allow local SVG icons that use `currentColor` to follow `iconColor`.
+
+- Updated dependencies [[`0888635`](https://github.com/likec4/likec4/commit/0888635f3269978599d0fd724529f876332b362c), [`dc7eba2`](https://github.com/likec4/likec4/commit/dc7eba24559706f2e41ee5f8bfd66e79363de435)]:
+  - @likec4/core@1.59.3
+  - @likec4/generators@1.59.3
+  - @likec4/config@1.59.3
+  - @likec4/language-services@1.59.3
+  - @likec4/layouts@1.59.3
+  - @likec4/log@1.59.3
+  - @likec4/icons@1.46.4
+
 ## 1.59.2
 
 ### Patch Changes
