@@ -1,5 +1,5 @@
 import type { AdhocViewPredicate } from '@likec4/core/compute-view'
-import type { LayoutedElementView, ProjectId, ViewChange, ViewId } from '@likec4/core/types'
+import type { LayoutedElementView, ModelChange, ProjectId, ViewChange, ViewId } from '@likec4/core/types'
 
 export interface LikeC4VitePluginRpc {
   /**
@@ -20,7 +20,18 @@ export interface LikeC4VitePluginRpc {
     projectId: ProjectId
     viewId: ViewId
     change: ViewChange
-  }): Promise<void>
+    changeId?: string
+  }): Promise<{ success: boolean; error?: string }>
+
+  /**
+   * Send a model change to the server
+   * (Available in the dev server)
+   */
+  updateModel(payload: {
+    projectId: ProjectId
+    change: ModelChange
+    changeId?: string
+  }): Promise<{ success: boolean; error?: string; warnings?: string[] }>
 
   /**
    * Calculate an adhoc view

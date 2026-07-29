@@ -30,6 +30,9 @@ export const likec4rpc = rpc ?? {
   updateView: () => {
     throw new Error('likec4rpc.updateView is not available in production')
   },
+  updateModel: () => {
+    throw new Error('likec4rpc.updateModel is not available in production')
+  },
   calcAdhocView: () => {
     throw new Error('likec4rpc.calcAdhocView is not available in production')
   },

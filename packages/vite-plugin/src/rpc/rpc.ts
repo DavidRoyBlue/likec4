@@ -4,6 +4,7 @@ import type { AIOptions } from '../plugin'
 import type { SharedVirtualModuleOptions } from '../virtuals/_shared'
 import { applySemanticLayout } from './functions/applySemanticLayout'
 import { calcAdhocView } from './functions/calcAdhocView'
+import { updateModel } from './functions/updateModel'
 import { updateView } from './functions/updateView'
 import type { LikeC4VitePluginRpc } from './protocol'
 import { sendError } from './sendError'
@@ -21,6 +22,7 @@ export function enablePluginRPC(
 
   const functions: LikeC4VitePluginRpc = {
     updateView: (data) => updateView(params, data),
+    updateModel: (data) => updateModel(params, data),
     calcAdhocView: (data) => calcAdhocView(params, data),
     applySemanticLayout: (data) => applySemanticLayout(params, data),
   }

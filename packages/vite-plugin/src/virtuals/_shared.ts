@@ -25,6 +25,11 @@ export type SharedVirtualModuleOptions =
     logger: ViteLogger
     likec4: LikeC4LanguageServices
     assetsDir: string
+    /**
+     * Tracks the last applied model/view changeId per projectId, so the client
+     * can ack that its optimistic change was applied when regenerated model data arrives.
+     */
+    appliedChanges: Map<string, string>
   }
   & (
     {

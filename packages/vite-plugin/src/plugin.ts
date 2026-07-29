@@ -196,6 +196,10 @@ export function LikeC4VitePlugin({
   let rpcEnabled = false
   let ai: AIOptions | undefined = undefined
   let shouldDisposeOnStop = pluginOpts.watch ?? false
+  // Single shared instance: `moduleopts` runs on every virtual-module load and once for
+  // `enablePluginRPC`, so constructing this map inside its return literal would create a
+  // different map per call and silently break the ack mechanism.
+  const appliedChanges = new Map<string, string>()
 
   const virtuals = [
     ..._virtuals,
@@ -231,6 +235,7 @@ export function LikeC4VitePlugin({
       assetsDir,
       likec4,
       logger,
+      appliedChanges,
       ...value,
     }
   }
