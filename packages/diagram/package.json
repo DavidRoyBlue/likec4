@@ -77,6 +77,7 @@
     "@lume/kiwi": "catalog:utils",
     "@mantine/core": "catalog:mantine",
     "@mantine/hooks": "catalog:mantine",
+    "@mantine/notifications": "catalog:mantine",
     "@nanostores/media-query": "catalog:react",
     "@nanostores/react": "catalog:react",
     "@react-hookz/web": "catalog:react",

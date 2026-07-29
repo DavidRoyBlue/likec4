@@ -100,6 +100,33 @@ export class LikeC4ModelLocator {
     }
   }
 
+  /**
+   * Like {@link locateViewAst}, but for model elements:
+   * resolves an FQN to its declaring document and live AST node.
+   */
+  public locateElementAst(fqn: c4.Fqn, projectId?: c4.ProjectId): null | {
+    doc: ParsedLikeC4LangiumDocument
+    element: ParsedAstElement
+    elementAst: ast.Element
+  } {
+    const found = this.getParsedElement(...(projectId ? [fqn, projectId] as const : [fqn] as const))
+    if (!found) {
+      return null
+    }
+    const elementAst = this.services.workspace.AstNodeLocator.getAstNode(
+      found.document.parseResult.value,
+      found.element.astPath,
+    )
+    if (!elementAst || !ast.isElement(elementAst)) {
+      return null
+    }
+    return {
+      doc: found.document as ParsedLikeC4LangiumDocument,
+      element: found.element,
+      elementAst,
+    }
+  }
+
   private findParsedElementByFqnIn(fqn: c4.Fqn, doc: LangiumDocument | undefined): ParsedAstElement | undefined {
     if (!doc) {
       return undefined
