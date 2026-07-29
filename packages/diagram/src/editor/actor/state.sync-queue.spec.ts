@@ -49,6 +49,66 @@ describe('sync queue ack discipline', () => {
     expect(actor.getSnapshot().matches({ syncQueue: 'idle' })).toBe(true)
   })
 
+  it('releases on an ack that arrived while executeChange was still pending, not on the 8s hatch', async () => {
+    vi.useFakeTimers()
+    let resolveRpc!: (v: any) => void
+    const executed: any[] = []
+    const actor = makeActor(async (input) => {
+      executed.push(input)
+      return await new Promise(r => (resolveRpc = r))
+    })
+    actor.start()
+    actor.send({ type: 'change.view', change: { op: 'change-autolayout', layout: { direction: 'TB' } } as any })
+    await vi.advanceTimersByTimeAsync(10)
+    const changeId = executed[0].changes[0].changeId
+
+    // The HMR model push carrying the applied change id outruns the RPC reply:
+    // the only ack for this batch lands while executeChanges is still invoking.
+    actor.send({ type: 'view.synched', changeId })
+    await vi.advanceTimersByTimeAsync(10)
+    expect(actor.getSnapshot().matches({ syncQueue: { process: 'executeChanges' } })).toBe(true)
+
+    resolveRpc({ requested: executed[0].changes, applied: executed[0].changes, failed: [], warnings: [] })
+    // No further ack will ever come - releasing must not wait for the escape hatch
+    await vi.advanceTimersByTimeAsync(10)
+    expect(actor.getSnapshot().matches({ syncQueue: 'idle' })).toBe(true)
+  })
+
+  it('drains requested ops from the queue by changeId, not object identity', async () => {
+    vi.useFakeTimers()
+    const invocations: string[][] = []
+    let release!: (v: any) => void
+    const actor = makeActor(async (input) => {
+      invocations.push(input.changes.map((c: any) => c.changeId))
+      return await new Promise(r => (release = r))
+    })
+    actor.start()
+    actor.send({ type: 'change.view', change: { op: 'change-autolayout', layout: { direction: 'TB' } } as any })
+    await vi.advanceTimersByTimeAsync(10)
+    actor.send({ type: 'change.view', change: { op: 'change-autolayout', layout: { direction: 'LR' } } as any })
+    await vi.advanceTimersByTimeAsync(10)
+
+    const queued = actor.getSnapshot().context.syncQueue
+    expect(queued).toHaveLength(1)
+    const queuedId = (queued[0] as any).changeId
+
+    // Report both ops back as *clones* - same changeId, different object references,
+    // as any serializing hop (birpc over the HMR channel) would produce.
+    const reported = [
+      { ...(actor.getSnapshot().context.processing as any) },
+      { ...(queued[0] as any) },
+    ]
+    release({ requested: reported, applied: reported, failed: [], warnings: [] })
+    await vi.advanceTimersByTimeAsync(10)
+    actor.send({ type: 'view.synched', changeId: queuedId })
+    await vi.advanceTimersByTimeAsync(10)
+
+    // Both ids were reported as requested, so nothing is left to re-execute.
+    // With identity matching the clone would miss and the queued op would run twice.
+    expect(invocations).toHaveLength(1)
+    expect(actor.getSnapshot().matches({ syncQueue: 'idle' })).toBe(true)
+  })
+
   it('does not start the second op before the first is acked (the #2975 duplicate-insert class)', async () => {
     vi.useFakeTimers()
     const invocations: string[][] = []

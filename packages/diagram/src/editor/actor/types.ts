@@ -94,7 +94,28 @@ export interface EditorActorContext {
    * Empty means "nothing outstanding".
    */
   awaitingAck: string[]
+
+  /**
+   * Acks observed for the current batch *before* the queue reached `waitViewSynced`.
+   *
+   * The HMR model push that carries the applied change id can outrun the RPC reply,
+   * so the only ack for a batch may arrive while `executeChanges` is still invoking.
+   * Recording it here keeps it from being dropped (which would strand the queue on
+   * the 8s escape hatch with the canvas frozen by the `busy` tag).
+   *
+   * `null` entries are un-correlated acks (sources that don't thread change ids).
+   */
+  seenAcks: Array<string | null>
 }
+
+/**
+ * The `view.synched` release rule, in one place so the event-driven check in
+ * `waitViewSynced` and the replay of {@link EditorActorContext.seenAcks} cannot drift.
+ *
+ * Releases on an un-correlated ack, on nothing being outstanding, or on a match.
+ */
+export const ackReleasesQueue = (awaitingAck: string[], changeId: string | null | undefined): boolean =>
+  changeId == null || awaitingAck.length === 0 || awaitingAck.includes(changeId)
 
 export type EditorActorEmitedEvent = { type: 'idle' }
 

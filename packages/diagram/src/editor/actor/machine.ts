@@ -18,6 +18,7 @@ const _editorActorLogic = machine.createMachine({
     syncQueue: [],
     processing: null,
     awaitingAck: [],
+    seenAcks: [],
   }),
   type: 'parallel',
   states: {

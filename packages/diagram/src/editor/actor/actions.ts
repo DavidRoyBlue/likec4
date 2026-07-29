@@ -295,4 +295,5 @@ export const clearQueue = () =>
     syncQueue: [],
     processing: null,
     awaitingAck: [],
+    seenAcks: [],
   })

@@ -14,7 +14,7 @@ import {
   undo,
 } from './actions'
 import { machine } from './setup'
-import { isQueuedChange } from './types'
+import { ackReleasesQueue, isQueuedChange } from './types'
 
 const to = {
   idle: { target: '#queue-idle' },
@@ -151,6 +151,7 @@ const clearProcessing = () => ({
   processing: null,
   // Nothing is outstanding once we leave the wait (also cleans up after the escape hatch)
   awaitingAck: [],
+  seenAcks: [],
 })
 
 /**
@@ -280,6 +281,10 @@ const process = machine.createStateConfig({
      * Calls `executeChange` to save the snapshot
      */
     executeChanges: machine.createStateConfig({
+      // A new batch starts with a clean ack slate, so an ack observed here can only
+      // belong to this batch. Deliberately NOT cleared in `onDone` - that would erase
+      // an ack that beat the RPC reply, which is the whole point of recording them.
+      entry: assign({ seenAcks: [] }),
       invoke: {
         src: 'executeChange',
         input: ({ context: { processing, syncQueue, viewId } }) => {
@@ -301,8 +306,12 @@ const process = machine.createStateConfig({
             const requested = event.output.requested
             enqueue.assign({
               processing: null,
-              // Wrapper objects are stable, so identity is the right filter here
-              syncQueue: context.syncQueue.filter(op => !isQueuedChange(op) || !requested.includes(op)),
+              // Match by ack token, not object identity: `requested` only shares
+              // references with the queue while the actor logic happens to echo
+              // `input.changes` locally. Any serializing hop (birpc) would break that.
+              syncQueue: context.syncQueue.filter(op =>
+                !isQueuedChange(op) || !requested.some(item => item.changeId === op.changeId)
+              ),
               // Only what actually reached the server needs an ack
               awaitingAck: event.output.applied.map(item => item.changeId),
             })
@@ -334,15 +343,20 @@ const process = machine.createStateConfig({
 
     // This state blocks further changes until the view is fully synced
     waitViewSynced: {
+      // The ack may already have arrived while `executeChanges` was still invoking
+      // (the HMR model push can outrun the RPC reply). Replay what was recorded so
+      // such a batch releases at once instead of stalling on the 8s escape hatch.
+      always: {
+        guard: ({ context }) => context.seenAcks.some(changeId => ackReleasesQueue(context.awaitingAck, changeId)),
+        actions: log('view.synched arrived before the RPC reply — releasing on the recorded ack'),
+        target: 'decideNext',
+      },
       on: {
         'view.synched': [
           {
             // `changeId == null` releases the queue for sources that don't thread
             // ack tokens (VSCode preview, applyLatest) - they must not deadlock it.
-            guard: ({ context, event }) =>
-              event.changeId == null
-              || context.awaitingAck.length === 0
-              || context.awaitingAck.includes(event.changeId),
+            guard: ({ context, event }) => ackReleasesQueue(context.awaitingAck, event.changeId),
             actions: assign({ awaitingAck: [] }),
             target: 'decideNext',
           },
@@ -384,6 +398,14 @@ const process = machine.createStateConfig({
     // being deeper, still wins - its ignore-window is preserved.
     'change.*': {
       actions: pushToSyncQueue(),
+    },
+    // Acks can land before the queue reaches `waitViewSynced` (deeper states that
+    // handle `view.synched` themselves - i.e. `waitViewSynced` - still win here).
+    // Record rather than drop, so the batch is not stranded on the 8s hatch.
+    'view.synched': {
+      actions: assign(({ context, event }) => ({
+        seenAcks: [...context.seenAcks, event.changeId ?? null],
+      })),
     },
     // 'undo': {
     //   actions: log('ignore undo in process state'),
