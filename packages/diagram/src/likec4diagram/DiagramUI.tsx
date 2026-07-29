@@ -1,8 +1,9 @@
 import { hasProp, isDynamicView } from '@likec4/core'
+import { Notifications } from '@mantine/notifications'
 import { useRerender } from '@react-hookz/web'
 import { memo, useCallback } from 'react'
 import { ErrorBoundary } from '../components/ErrorFallback'
-import { useEnabledFeatures } from '../context/DiagramFeatures'
+import { IfEnabled, useEnabledFeatures } from '../context/DiagramFeatures'
 import { selectDiagramSnapshot, useDiagramSelector } from '../hooks'
 import { NavigationPanel } from '../navigationpanel'
 import { Overlays } from '../overlays/Overlays'
@@ -49,6 +50,9 @@ export const LikeC4DiagramUI = memo(() => {
 
   return (
     <ErrorBoundary onReset={handleReset}>
+      <IfEnabled feature="Editor">
+        <Notifications position="bottom-right" limit={3} />
+      </IfEnabled>
       {isSequenceView && <FloatingSequenceActors isActiveWalkthrough={isActiveWalkthrough} />}
       {isActiveWalkthrough && <SequenceOutlinePanel />}
       {enableControls && actors.navigation && !isActiveWalkthrough && <NavigationPanel actorRef={actors.navigation} />}

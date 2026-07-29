@@ -114,6 +114,12 @@ export interface EditorActorContext {
    * `null` entries are un-correlated acks (sources that don't thread change ids).
    */
   seenAcks: Array<string | null>
+
+  /**
+   * Failures from the most recent `executeChange` batch, stashed while the
+   * `failureNotify` state refetches server truth and before notifications fire.
+   */
+  lastFailures: Array<{ op: string; error: string }>
 }
 
 /**

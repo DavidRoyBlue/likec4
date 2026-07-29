@@ -12,8 +12,7 @@ function makeActor(executeChangeImpl: (input: any) => Promise<any>) {
       executeChange: fromPromise(({ input }) => executeChangeImpl(input)),
       applyLatest: fromPromise(async () => ({ updated: {} as any })),
       applySemanticLayout: fromPromise(async () => ({})),
-      // NOTE: Task 10 adds a `refetchView` actor to setup.ts — when implementing
-      // Task 10, extend this helper to also provide it.
+      refetchView: fromPromise(async ({ input }: any) => ({ view: { id: input.viewId } as any })),
     },
   })
   return createActor(logic, { input: { viewId: 'index' as any }, systemId: 'editor' })
@@ -146,5 +145,32 @@ describe('sync queue ack discipline', () => {
     expect(executed).toHaveLength(1)
     expect(executed[0].changes[0].change.op).toBe('change-element-property')
     expect(executed[0].changes[0].changeId).toBeTypeOf('string')
+  })
+
+  it('on failed change: refetches server truth and clears queue (no silent failure)', async () => {
+    const refetched: any[] = []
+    const logic = editorActorLogic.provide({
+      actors: {
+        executeChange: fromPromise(async ({ input }) => ({
+          requested: input.changes,
+          applied: [],
+          failed: input.changes.map((item: any) => ({ item, error: 'boom' })),
+          warnings: [],
+        })),
+        refetchView: fromPromise(async ({ input }) => {
+          refetched.push(input)
+          return { view: { id: input.viewId } as any }
+        }),
+        applyLatest: fromPromise(async () => ({ updated: {} as any })),
+        applySemanticLayout: fromPromise(async () => ({})),
+      },
+    })
+    const actor = createActor(logic, { input: { viewId: 'index' as any }, systemId: 'editor' })
+    actor.start()
+    actor.send({ type: 'change.view', change: { op: 'change-autolayout', layout: { direction: 'TB' } } as any })
+    await new Promise(r => setTimeout(r, 50))
+    expect(refetched).toHaveLength(1)
+    expect(actor.getSnapshot().matches({ syncQueue: 'idle' })).toBe(true)
+    expect(actor.getSnapshot().context.syncQueue).toHaveLength(0)
   })
 })

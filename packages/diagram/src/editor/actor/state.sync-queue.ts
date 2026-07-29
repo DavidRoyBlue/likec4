@@ -2,6 +2,7 @@ import { invariant } from '@likec4/core'
 import { findLast } from 'remeda'
 import { assign, enqueueActions, log, sendTo } from 'xstate'
 import { typedSystem } from '../../likec4diagram/state/utils'
+import { notifyEditError, notifyEditWarning } from '../notifyEditError'
 import {
   cancelSync,
   clearQueue,
@@ -225,6 +226,7 @@ const process = machine.createStateConfig({
             onError: {
               actions: assign(({ event }) => {
                 console.error('applyLatestToManual onError', { error: event.error })
+                notifyEditError({ op: 'apply-latest-to-manual', error: String(event.error) })
                 return {
                   processing: null,
                   syncQueue: [],
@@ -272,6 +274,7 @@ const process = machine.createStateConfig({
         onError: {
           actions: ({ event }) => {
             console.error('applySemanticLayout onError', { error: event.error })
+            notifyEditError({ op: 'apply-semantic-layout', error: String(event.error) })
           },
           target: 'failure',
         },
@@ -298,45 +301,106 @@ const process = machine.createStateConfig({
             viewId,
           })
         },
-        onDone: {
-          actions: enqueueActions(({ context, event, enqueue }) => {
-            if (import.meta.env.DEV) {
-              console.log('executeChanges onDone', { event })
-            }
-            const requested = event.output.requested
-            enqueue.assign({
-              processing: null,
-              // Match by ack token, not object identity: `requested` only shares
-              // references with the queue while the actor logic happens to echo
-              // `input.changes` locally. Any serializing hop (birpc) would break that.
-              syncQueue: context.syncQueue.filter(op =>
-                !isQueuedChange(op) || !requested.some(item => item.changeId === op.changeId)
-              ),
-              // Only what actually reached the server needs an ack
-              awaitingAck: event.output.applied.map(item => item.changeId),
-            })
+        onDone: [
+          {
+            guard: ({ event }) => event.output.failed.length > 0,
+            actions: assign({
+              lastFailures: ({ event }) =>
+                event.output.failed.map(({ item, error }) => ({ op: item.change.op, error })),
+            }),
+            target: 'failureNotify',
+          },
+          {
+            actions: enqueueActions(({ context, event, enqueue }) => {
+              if (import.meta.env.DEV) {
+                console.log('executeChanges onDone', { event })
+              }
+              const requested = event.output.requested
+              enqueue.assign({
+                processing: null,
+                // Match by ack token, not object identity: `requested` only shares
+                // references with the queue while the actor logic happens to echo
+                // `input.changes` locally. Any serializing hop (birpc) would break that.
+                syncQueue: context.syncQueue.filter(op =>
+                  !isQueuedChange(op) || !requested.some(item => item.changeId === op.changeId)
+                ),
+                // Only what actually reached the server needs an ack
+                awaitingAck: event.output.applied.map(item => item.changeId),
+              })
 
-            const lastSyncSnapshot = findLast(
-              event.output.applied,
-              item => item.change.op === 'save-view-snapshot',
-            )
-            if (lastSyncSnapshot && lastSyncSnapshot.change.op === 'save-view-snapshot') {
-              enqueue.sendTo(
-                typedSystem.diagramActor,
-                {
-                  type: 'update.view-bounds',
-                  bounds: lastSyncSnapshot.change.layout.bounds,
-                },
+              const lastSyncSnapshot = findLast(
+                event.output.applied,
+                item => item.change.op === 'save-view-snapshot',
               )
-            }
-          }),
-          target: 'waitViewSynced',
-        },
+              if (lastSyncSnapshot && lastSyncSnapshot.change.op === 'save-view-snapshot') {
+                enqueue.sendTo(
+                  typedSystem.diagramActor,
+                  {
+                    type: 'update.view-bounds',
+                    bounds: lastSyncSnapshot.change.layout.bounds,
+                  },
+                )
+              }
+
+              // Non-fatal messages surfaced to the user (populated by model changes,
+              // e.g. extend-tag warnings)
+              for (const warning of event.output.warnings) {
+                notifyEditWarning(warning)
+              }
+            }),
+            target: 'waitViewSynced',
+          },
+        ],
         onError: {
           actions: ({ event }) => {
             console.error('executeChanges onError', { error: event.error })
           },
           target: 'failure',
+        },
+      },
+    }),
+
+    /**
+     * At least one change in the batch failed: server truth wins. Refetch the
+     * current view, push it to the diagram, notify every failure, and drop
+     * whatever was queued - the client-side queue can no longer be trusted to
+     * apply cleanly against server state it disagrees with.
+     */
+    failureNotify: machine.createStateConfig({
+      invoke: {
+        src: 'refetchView',
+        input: ({ context }) => ({ viewId: context.viewId }),
+        onDone: {
+          actions: [
+            // GUARDED send: system.get('diagram') is absent in standalone contexts
+            // (unit tests, detached actors) where a raw sendTo would throw.
+            enqueueActions(({ enqueue, event, system }) => {
+              if ((system as any).get('diagram')) {
+                enqueue.sendTo(typedSystem.diagramActor, {
+                  type: 'update.view' as const,
+                  view: event.output.view,
+                  source: 'editor' as const,
+                })
+              }
+            }),
+            ({ context }) => {
+              for (const f of context.lastFailures) {
+                notifyEditError(f)
+              }
+            },
+            assign({ lastFailures: [], awaitingAck: [], syncQueue: [], processing: null }),
+          ],
+          ...to.idle,
+        },
+        onError: {
+          // refetch itself failed — notify and reset; HMR will eventually restore truth
+          actions: [
+            ({ context }) => {
+              for (const f of context.lastFailures) notifyEditError(f)
+            },
+            assign({ lastFailures: [], awaitingAck: [], syncQueue: [], processing: null }),
+          ],
+          ...to.idle,
         },
       },
     }),

@@ -73,6 +73,17 @@ export function useEditorActorLogic(): EditorActorLogic & {
     },
   )
 
+  const refetchView: EditorCalls.RefetchView = useCallbackRef(
+    async ({ input }) => {
+      if (!port) {
+        console.error('No editor port available for refetching view')
+        throw new Error('No editor port')
+      }
+      const view = await promisify(() => port.fetchView(input.viewId, 'auto'))
+      return { view }
+    },
+  )
+
   const applySemanticLayout: EditorCalls.ApplySemanticLayout = useCallbackRef(
     async ({ input }) => {
       if (!port) {
@@ -101,8 +112,9 @@ export function useEditorActorLogic(): EditorActorLogic & {
           applyLatest: fromPromise(applyLatest),
           executeChange: fromPromise(executeChange),
           applySemanticLayout: fromPromise(applySemanticLayout),
+          refetchView: fromPromise(refetchView),
         },
       }),
       { isStub },
-    ), [applyLatest, executeChange, applySemanticLayout, isStub])
+    ), [applyLatest, executeChange, applySemanticLayout, refetchView, isStub])
 }

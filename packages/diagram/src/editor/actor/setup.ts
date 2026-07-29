@@ -38,6 +38,14 @@ export namespace EditorCalls {
     export type Output = {}
   }
 
+  export type RefetchView = (
+    params: { input: RefetchView.Input },
+  ) => Promise<RefetchView.Output>
+  export namespace RefetchView {
+    export type Input = { viewId: t.ViewId }
+    export type Output = { view: t.LayoutedView }
+  }
+
   export type ExecuteChange = (
     params: { input: ExecuteChange.Input },
   ) => Promise<ExecuteChange.Output>
@@ -78,11 +86,18 @@ const applySemanticLayout = fromPromise<EditorCalls.ApplySemanticLayout.Output, 
   },
 )
 
+const refetchView = fromPromise<EditorCalls.RefetchView.Output, EditorCalls.RefetchView.Input>(
+  () => {
+    throw new Error('Not implemented')
+  },
+)
+
 const actors = defineActors({
   hotkey,
   applyLatest,
   executeChange,
   applySemanticLayout,
+  refetchView,
 })
 
 export const machine = setup({
