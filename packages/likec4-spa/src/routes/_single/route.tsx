@@ -15,6 +15,7 @@ export const Route = createFileRoute('/_single')({
     const data = await loadModel(projectId)
     return {
       $likec4model: data.$likec4model,
+      $appliedChangeId: data.$appliedChangeId,
       projectId,
     }
   },
@@ -23,11 +24,11 @@ export const Route = createFileRoute('/_single')({
 })
 
 function RouteComponent() {
-  const { $likec4model, projectId } = Route.useLoaderData()
+  const { $likec4model, $appliedChangeId, projectId } = Route.useLoaderData()
   return (
     <ViewOutlet>
       <LikeC4IconRendererContext projectId={projectId}>
-        <LikeC4ModelContext likec4model={$likec4model}>
+        <LikeC4ModelContext likec4model={$likec4model} appliedChangeId={$appliedChangeId}>
           <Outlet />
         </LikeC4ModelContext>
       </LikeC4IconRendererContext>

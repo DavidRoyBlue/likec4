@@ -87,6 +87,7 @@ export function LikeC4Diagram<A extends Any = Any>({
   where,
   reactFlowProps,
   renderNodes,
+  appliedChangeId,
   children,
 }: LikeC4DiagramProps<A>): JSX.Element {
   const id = useId()
@@ -200,6 +201,7 @@ export function LikeC4Diagram<A extends Any = Any>({
                         nodesSelectable={nodesSelectable}
                         where={where ?? null}
                         dynamicViewVariant={dynamicViewVariant}
+                        appliedChangeId={appliedChangeId}
                       >
                         <CurrentViewModelProvider>
                           <LikeC4DiagramXYFlow

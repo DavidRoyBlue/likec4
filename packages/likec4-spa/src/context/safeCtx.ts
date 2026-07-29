@@ -1,5 +1,6 @@
+import { nonNullable } from '@likec4/core'
 import type { LikeC4Model } from '@likec4/core/model'
-import type { Atom } from 'nanostores'
+import type { Atom, ReadableAtom } from 'nanostores'
 import { createContext, useContext } from 'react'
 
 /**
@@ -15,6 +16,12 @@ export const useLikeC4ModelAtom = () => {
     throw new Error('LikeC4ModelAtom is not provided')
   }
   return ctx
+}
+
+const AppliedChangeIdContext = createContext<ReadableAtom<string | null> | null>(null)
+export const AppliedChangeIdProvider = AppliedChangeIdContext.Provider
+export function useAppliedChangeIdAtom(): ReadableAtom<string | null> {
+  return nonNullable(useContext(AppliedChangeIdContext), 'No AppliedChangeIdContext')
 }
 
 // /**

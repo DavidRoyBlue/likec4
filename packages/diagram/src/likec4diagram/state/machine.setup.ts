@@ -82,6 +82,7 @@ export interface Input {
   where: WhereOperator | null
   dynamicViewVariant?: DynamicViewDisplayVariant | undefined
   features?: EnabledFeatures
+  appliedChangeId?: string | null | undefined
 }
 
 export type ToggledFeatures = {

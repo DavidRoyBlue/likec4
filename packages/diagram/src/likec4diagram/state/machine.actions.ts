@@ -625,9 +625,10 @@ export const sendSynced = () => {
   }
   return machine.sendTo(
     typedSystem.editorActor,
-    {
-      type: 'view.synched',
-    },
+    ({ context }) => ({
+      type: 'view.synched' as const,
+      changeId: context.appliedChangeId ?? null,
+    }),
   )
 }
 

@@ -34,6 +34,7 @@ export function DiagramActorProvider({
   where = null,
   children,
   dynamicViewVariant: _defaultVariant,
+  appliedChangeId,
 }: PropsWithChildren<{
   id: string
   view: DiagramView
@@ -44,6 +45,7 @@ export function DiagramActorProvider({
   fitViewPadding: ViewPaddings
   where?: WhereOperator | null
   dynamicViewVariant?: DynamicViewDisplayVariant | undefined
+  appliedChangeId?: string | null | undefined
 }>) {
   const xystore = useStoreApi<Types.Node, Types.Edge>()
 
@@ -71,6 +73,7 @@ export function DiagramActorProvider({
         where,
         features,
         dynamicViewVariant: _defaultVariant,
+        appliedChangeId,
       },
     },
   )
@@ -91,9 +94,9 @@ export function DiagramActorProvider({
     () =>
       actor.send({
         type: 'update.inputs',
-        inputs: { zoomable, where, pannable, fitViewPadding, nodesDraggable, nodesSelectable },
+        inputs: { zoomable, where, pannable, fitViewPadding, nodesDraggable, nodesSelectable, appliedChangeId },
       }),
-    [actor, zoomable, where, pannable, fitViewPadding, nodesDraggable, nodesSelectable],
+    [actor, zoomable, where, pannable, fitViewPadding, nodesDraggable, nodesSelectable, appliedChangeId],
   )
 
   useUpdateEffect(() => {

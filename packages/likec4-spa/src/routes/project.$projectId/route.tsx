@@ -35,6 +35,7 @@ export const Route = createFileRoute('/project/$projectId')({
     }
     return {
       $likec4model: likec4model.$likec4model,
+      $appliedChangeId: likec4model.$appliedChangeId,
       projectId,
     }
   },
@@ -56,11 +57,11 @@ export const Route = createFileRoute('/project/$projectId')({
 })
 
 function RouteComponent() {
-  const { $likec4model, projectId } = Route.useLoaderData()
+  const { $likec4model, $appliedChangeId, projectId } = Route.useLoaderData()
   return (
     <ViewOutlet>
       <LikeC4IconRendererContext projectId={projectId}>
-        <LikeC4ModelContext likec4model={$likec4model}>
+        <LikeC4ModelContext likec4model={$likec4model} appliedChangeId={$appliedChangeId}>
           <Outlet />
         </LikeC4ModelContext>
       </LikeC4IconRendererContext>

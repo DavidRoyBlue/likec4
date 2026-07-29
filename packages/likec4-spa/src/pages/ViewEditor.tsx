@@ -7,12 +7,13 @@
 
 import { LikeC4Diagram, LikeC4EditorProvider } from '@likec4/diagram'
 import { useCallbackRef } from '@mantine/hooks'
+import { useStore } from '@nanostores/react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { isDevelopment } from 'likec4:app-config'
 import { isAIAvailable, likec4rpc } from 'likec4:rpc'
 import { LazyAIChat } from '../aichat'
 import { NotFound } from '../components/NotFound'
-import { useLikeC4ModelAtom } from '../context/safeCtx'
+import { useAppliedChangeIdAtom, useLikeC4ModelAtom } from '../context/safeCtx'
 import { useCurrentProject, useCurrentView } from '../hooks'
 import { FocusElementFromUrl, ListenForDiagramStateChanges, OpenRelationshipBrowserFromUrl } from './ViewReact'
 
@@ -21,6 +22,7 @@ export function ViewEditor() {
   const project = useCurrentProject()
   const [view, setLayoutType] = useCurrentView()
   const $likec4model = useLikeC4ModelAtom()
+  const appliedChangeId = useStore(useAppliedChangeIdAtom())
   const { dynamic } = useSearch({ strict: false })
 
   const onNavigateTo = useCallbackRef((viewId: string) => {
@@ -49,13 +51,13 @@ export function ViewEditor() {
           const model = $likec4model.get().view(id)
           return layout === 'auto' ? model.$view : model.$layouted
         },
-        handleChange: (viewId, change) => {
+        handleChange: async (viewId, change) => {
           const event = {
             projectId: project.id,
             viewId,
             change,
           }
-          return likec4rpc.updateView(event)
+          await likec4rpc.updateView(event)
         },
         ...(isAIAvailable && {
           applySemanticLayout: (viewId) => {
@@ -68,6 +70,7 @@ export function ViewEditor() {
       }}>
       <LikeC4Diagram
         view={view}
+        appliedChangeId={appliedChangeId}
         zoomable
         pannable
         controls

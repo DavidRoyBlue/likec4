@@ -10,7 +10,7 @@ export type EditorActorEvent =
   | { type: 'change.sync-snapshot' }
   | { type: 'delete.nodes-edges'; nodeIds: t.NodeId[]; edgeIds: t.EdgeId[] }
   // view update has been received, consider synced
-  | { type: 'view.synched' }
+  | { type: 'view.synched'; changeId?: string | null }
   | { type: 'cancel' }
   // Edit events
   | { type: 'edit.move.start'; subject: 'node' | 'edge' }

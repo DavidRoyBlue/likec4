@@ -44,6 +44,7 @@ declare module 'likec4:model' {
 
   export function loadModel(projectId: string): Promise<{
     $likec4data: Atom<LayoutedLikeC4ModelData>
+    $appliedChangeId: Atom<string | null>
     $likec4model: Atom<LikeC4Model<UnknownLayouted>>
     useLikeC4Model: () => LikeC4Model<UnknownLayouted>
     useLikeC4Views: () => ReadonlyArray<DiagramView<UnknownLayouted>>
@@ -133,6 +134,7 @@ declare module 'likec4:model/*' {
   export type LikeC4ViewId = aux.ViewId<Types>
 
   export const $likec4data: Atom<LayoutedLikeC4ModelData<Types>>
+  export const $appliedChangeId: Atom<string | null>
   export const $likec4model: Atom<LikeC4Model<Types>>
   export function useLikeC4Model(): LikeC4Model<Types>
   export function useLikeC4Views(): ReadonlyArray<DiagramView<Types>>

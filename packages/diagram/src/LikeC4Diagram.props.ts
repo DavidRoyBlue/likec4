@@ -290,6 +290,11 @@ export interface LikeC4DiagramProperties<A extends Any = Unknown> {
    * Override ReactFlow props
    */
   reactFlowProps?: OverrideReactFlowProps | undefined
+
+  /**
+   * Ack token of the last server-applied change; used by the editor sync queue
+   */
+  appliedChangeId?: string | null | undefined
 }
 
 export type OpenSourceParams<A extends Any = Unknown> =
