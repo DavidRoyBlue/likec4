@@ -1,9 +1,11 @@
+import type * as t from '@likec4/core/types'
 import { useMemo } from 'react'
 import { isNullish } from 'remeda'
 import { fromPromise } from 'xstate'
 import { useCallbackRef } from '../hooks'
 import { type EditorActorLogic, editorActorLogic } from './actor/machine'
 import type { EditorCalls } from './actor/setup'
+import type { QueuedChange } from './actor/types'
 import { applyChangesToManualLayout } from './applyChangesToManualLayout'
 import { useOptionalLikeC4Editor } from './LikeC4EditorProvider'
 
@@ -45,16 +47,20 @@ export function useEditorActorLogic(): EditorActorLogic & {
       if (import.meta.env.DEV) {
         console.debug('Executing change', { input })
       }
-      const applied = [] as typeof input.changes
-      for (const change of input.changes) {
+      const applied: QueuedChange[] = []
+      const failed: Array<{ item: QueuedChange; error: string }> = []
+      for (const item of input.changes) {
         try {
-          await promisify(() => port.handleChange(input.viewId, change))
-          applied.push(change)
+          await promisify(() =>
+            port.handleChange(input.viewId, item.change as t.ViewChange, { changeId: item.changeId })
+          )
+          applied.push(item)
         } catch (error) {
-          console.error('Failed to execute change', { change, error })
+          console.error('Failed to execute change', { item, error })
+          failed.push({ item, error: error instanceof Error ? error.message : String(error) })
         }
       }
-      return { requested: input.changes, applied }
+      return { requested: input.changes, applied, failed, warnings: [] }
     },
   )
 

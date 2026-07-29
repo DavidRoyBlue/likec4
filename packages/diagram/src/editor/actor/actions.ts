@@ -6,7 +6,7 @@ import type { DiagramContext } from '../../likec4diagram/state/types'
 import { typedSystem } from '../../likec4diagram/state/utils'
 import type { Types } from '../../likec4diagram/types'
 import { machine } from './setup'
-import type { Snapshot, SyncOp } from './types'
+import { type QueuedChange, type Snapshot, type SyncOp, isQueuedChange, unwrapSyncOp } from './types'
 
 /**
  * Actually this is DiagramActorRef
@@ -36,17 +36,30 @@ export function makeSnapshot(system: ActorSystem<any>): Snapshot {
 
 type LayoutChanges = t.ViewChange.ResetManualLayout | t.ViewChange.SaveViewSnapshot
 export const isLayoutChange = (
-  change: t.ViewChange,
+  change: t.ViewChange | t.ModelChange,
 ): change is LayoutChanges => change.op === 'reset-manual-layout' || change.op === 'save-view-snapshot'
 
-export const isLayoutChangeOp = <T extends SyncOp>(
+/**
+ * Operates on *unwrapped* ops - callers holding a {@link QueuedChange} must
+ * unwrap first (see {@link unwrapSyncOp}).
+ */
+export const isLayoutChangeOp = <T extends ReturnType<typeof unwrapSyncOp>>(
   op: T,
 ): op is Extract<T, string | LayoutChanges> =>
   op === 'apply-latest-to-manual' || op === 'apply-semantic-layout' || op === 'sync-snapshot' || isLayoutChange(op)
 
 export const withoutSnapshotChanges = filter<t.ViewChange[], Exclude<t.ViewChange, LayoutChanges>>(
-  isNot(isLayoutChange),
+  isNot((change: t.ViewChange): change is LayoutChanges => isLayoutChange(change)),
 )
+
+let changeIdSeq = 0
+/**
+ * Ack token for a queued change.
+ *
+ * Deliberately not `crypto.randomUUID()` - it is undefined on insecure origins
+ * such as `http://<LAN-IP>` (`likec4 start --host`).
+ */
+export const newChangeId = (): string => `c${Date.now().toString(36)}-${++changeIdSeq}`
 
 export const scheduleSync = (delay = 50) => {
   return machine.raise({
@@ -220,7 +233,7 @@ export const pushToSyncQueue = () =>
     let nextOp: SyncOp
     switch (event.type) {
       case 'change.view':
-        nextOp = event.change
+        nextOp = { changeId: newChangeId(), change: event.change } satisfies QueuedChange
         break
       case 'change.semantic-layout':
         nextOp = 'apply-semantic-layout'
@@ -243,19 +256,25 @@ export const pushToSyncQueue = () =>
         syncQueue: [nextOp],
       }
     }
-    if (syncQueue.length === 1 && syncQueue[0] === nextOp) {
+    // Every `change.view` event yields a fresh QueuedChange wrapper, so ops must be
+    // compared by their *unwrapped* change - identity of the wrapper is meaningless.
+    // String sentinels keep plain identity comparison.
+    const isSameOp = (a: SyncOp, b: SyncOp): boolean =>
+      isQueuedChange(a) && isQueuedChange(b) ? a.change === b.change : a === b
+
+    if (syncQueue.length === 1 && isSameOp(syncQueue[0]!, nextOp)) {
       if (import.meta.env.DEV) {
         console.log('syncQueue has only one item and it is the same, not changing', { nextOp })
       }
       return {}
     }
 
-    const isNextLayoutChange = isLayoutChangeOp(nextOp)
+    const isNextLayoutChange = isLayoutChangeOp(unwrapSyncOp(nextOp))
     let pending = syncQueue.filter(existingOp => {
-      if (existingOp === nextOp) {
+      if (isSameOp(existingOp, nextOp)) {
         return false
       }
-      if (isNextLayoutChange && isLayoutChangeOp(existingOp)) {
+      if (isNextLayoutChange && isLayoutChangeOp(unwrapSyncOp(existingOp))) {
         // Keep the latest view change, drop the previous one
         return false
       }
@@ -275,4 +294,5 @@ export const clearQueue = () =>
   machine.assign({
     syncQueue: [],
     processing: null,
+    awaitingAck: [],
   })

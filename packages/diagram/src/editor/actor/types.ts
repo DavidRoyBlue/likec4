@@ -34,14 +34,37 @@ export interface EditorActorInput {
   viewId: t.ViewId
 }
 
+/**
+ * A change queued for sync, tagged with an ack token.
+ *
+ * The `changeId` travels to the language server and comes back on `view.synched`,
+ * which is how the queue knows the change it sent has actually landed
+ * (instead of guessing with a fixed timer).
+ */
+export type QueuedChange = {
+  changeId: string
+  change: t.ViewChange | t.ModelChange
+}
+
 export type SyncOp =
-  | t.ViewChange
+  | QueuedChange
   | 'sync-snapshot'
   | 'apply-semantic-layout'
   | 'apply-latest-to-manual'
 
-export const isViewChange = (change: SyncOp | null): change is t.ViewChange =>
-  change !== null && typeof change !== 'string'
+/**
+ * Structural guard - checks for the `changeId` property, so that assigning a raw
+ * `ViewChange` (an un-wrapped change, missing its ack token) anywhere in the
+ * queue is a compile error rather than a silent runtime bug.
+ */
+export const isQueuedChange = (op: SyncOp | null | undefined): op is QueuedChange =>
+  op !== null && op !== undefined && typeof op !== 'string' && 'changeId' in op
+
+/**
+ * Unwraps a queued change to the underlying change, string sentinels pass through.
+ */
+export const unwrapSyncOp = (op: SyncOp): t.ViewChange | t.ModelChange | Exclude<SyncOp, QueuedChange> =>
+  isQueuedChange(op) ? op.change : op
 
 export interface EditorActorContext {
   viewId: t.ViewId
@@ -65,6 +88,12 @@ export interface EditorActorContext {
 
   syncQueue: Array<SyncOp>
   processing: Exclude<SyncOp, 'sync-snapshot'> | null
+
+  /**
+   * Change ids sent to the server and not yet acknowledged by a `view.synched`.
+   * Empty means "nothing outstanding".
+   */
+  awaitingAck: string[]
 }
 
 export type EditorActorEmitedEvent = { type: 'idle' }

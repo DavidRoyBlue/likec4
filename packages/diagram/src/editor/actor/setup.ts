@@ -18,6 +18,7 @@ import type {
   EditorActorEvent,
   EditorActorInput,
   EditorActorStateTag,
+  QueuedChange,
 } from './types'
 
 export namespace EditorCalls {
@@ -41,11 +42,21 @@ export namespace EditorCalls {
     params: { input: ExecuteChange.Input },
   ) => Promise<ExecuteChange.Output>
   export namespace ExecuteChange {
-    export type Input = { viewId: t.ViewId; changes: t.ViewChange[] }
+    export type Input = { viewId: t.ViewId; changes: QueuedChange[] }
     /**
-     * Returns the changes that were applied to the view
+     * Outcome of a batch of queued changes.
+     *
+     * `applied` carries the ack tokens the queue then waits for on `view.synched`.
      */
-    export type Output = { requested: t.ViewChange[]; applied: t.ViewChange[] }
+    export type Output = {
+      requested: QueuedChange[]
+      applied: QueuedChange[]
+      failed: Array<{ item: QueuedChange; error: string }>
+      /**
+       * Non-fatal messages surfaced to the user (populated by model changes)
+       */
+      warnings: string[]
+    }
   }
 }
 

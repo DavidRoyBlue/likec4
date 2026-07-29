@@ -7,13 +7,14 @@ import {
   clearQueue,
   deleteNodesAndEdges,
   makeSnapshot,
+  newChangeId,
   pushToSyncQueue,
   redo,
   scheduleSync,
   undo,
 } from './actions'
 import { machine } from './setup'
-import { isViewChange } from './types'
+import { isQueuedChange } from './types'
 
 const to = {
   idle: { target: '#queue-idle' },
@@ -138,7 +139,7 @@ const peekFromQueue = () =>
   machine.assign(({ system, context: { syncQueue } }) => {
     let [head, ...tail] = syncQueue
     if (head === 'sync-snapshot') {
-      head = makeSnapshot(system).change
+      head = { changeId: newChangeId(), change: makeSnapshot(system).change }
     }
     return {
       processing: head ?? null,
@@ -148,6 +149,8 @@ const peekFromQueue = () =>
 
 const clearProcessing = () => ({
   processing: null,
+  // Nothing is outstanding once we leave the wait (also cleans up after the escape hatch)
+  awaitingAck: [],
 })
 
 /**
@@ -171,7 +174,7 @@ const process = machine.createStateConfig({
           target: 'applySemanticLayout',
         },
         {
-          guard: ({ context: { processing } }) => isViewChange(processing),
+          guard: ({ context: { processing } }) => isQueuedChange(processing),
           target: 'executeChanges',
         },
         {
@@ -191,7 +194,7 @@ const process = machine.createStateConfig({
     applyLatestToManual: machine.createStateConfig({
       initial: 'call',
       entry: assign(({ system }) => ({
-        processing: makeSnapshot(system).change,
+        processing: { changeId: newChangeId(), change: makeSnapshot(system).change },
       })),
       states: {
         // Fetch latest and manual layouts
@@ -201,9 +204,9 @@ const process = machine.createStateConfig({
             src: 'applyLatest',
             input: ({ context }) => {
               const current = context.processing
-              invariant(isViewChange(current) && current.op === 'save-view-snapshot')
+              invariant(isQueuedChange(current) && current.change.op === 'save-view-snapshot')
               return ({
-                current: current.layout,
+                current: current.change.layout,
                 viewId: context.viewId,
               })
             },
@@ -281,11 +284,11 @@ const process = machine.createStateConfig({
         src: 'executeChange',
         input: ({ context: { processing, syncQueue, viewId } }) => {
           // processing must be defined
-          invariant(processing && isViewChange(processing))
+          invariant(processing && isQueuedChange(processing))
           return ({
             changes: [
               processing,
-              ...syncQueue.filter(isViewChange),
+              ...syncQueue.filter(isQueuedChange),
             ],
             viewId,
           })
@@ -298,19 +301,22 @@ const process = machine.createStateConfig({
             const requested = event.output.requested
             enqueue.assign({
               processing: null,
-              syncQueue: context.syncQueue.filter(change => !isViewChange(change) || !requested.includes(change)),
+              // Wrapper objects are stable, so identity is the right filter here
+              syncQueue: context.syncQueue.filter(op => !isQueuedChange(op) || !requested.includes(op)),
+              // Only what actually reached the server needs an ack
+              awaitingAck: event.output.applied.map(item => item.changeId),
             })
 
             const lastSyncSnapshot = findLast(
               event.output.applied,
-              c => c.op === 'save-view-snapshot',
+              item => item.change.op === 'save-view-snapshot',
             )
-            if (lastSyncSnapshot) {
+            if (lastSyncSnapshot && lastSyncSnapshot.change.op === 'save-view-snapshot') {
               enqueue.sendTo(
                 typedSystem.diagramActor,
                 {
                   type: 'update.view-bounds',
-                  bounds: lastSyncSnapshot.layout.bounds,
+                  bounds: lastSyncSnapshot.change.layout.bounds,
                 },
               )
             }
@@ -329,13 +335,24 @@ const process = machine.createStateConfig({
     // This state blocks further changes until the view is fully synced
     waitViewSynced: {
       on: {
-        'view.synched': {
-          target: 'decideNext',
-        },
+        'view.synched': [
+          {
+            // `changeId == null` releases the queue for sources that don't thread
+            // ack tokens (VSCode preview, applyLatest) - they must not deadlock it.
+            guard: ({ context, event }) =>
+              event.changeId == null
+              || context.awaitingAck.length === 0
+              || context.awaitingAck.includes(event.changeId),
+            actions: assign({ awaitingAck: [] }),
+            target: 'decideNext',
+          },
+          { actions: log('view.synched with non-matching changeId — keep waiting') },
+        ],
       },
       after: {
-        // Fallback: if view.synched doesn't come, proceed after 2 second
-        2000: 'decideNext',
+        // Escape hatch only (server hung / HMR channel dropped) — 8s, not 30s:
+        // a stalled drag gesture must not freeze for half a minute.
+        8_000: 'decideNext',
       },
     },
 
@@ -361,14 +378,15 @@ const process = machine.createStateConfig({
     },
   },
   on: {
-    // 'change.*': {
-    //   actions: log(({ event }) => `ignore ${event.type} in process state`),
-    // },
+    // Changes arriving while an op is in flight (or awaiting its ack) are queued,
+    // never executed against un-acked state and never dropped.
+    // The `wait` sub-state of applyLatestToManual keeps its own `*` handler and,
+    // being deeper, still wins - its ignore-window is preserved.
+    'change.*': {
+      actions: pushToSyncQueue(),
+    },
     // 'undo': {
     //   actions: log('ignore undo in process state'),
-    // },
-    // 'view.synched': {
-    //   actions: log('im in process and got view.synched'),
     // },
   },
 })

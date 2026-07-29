@@ -51,13 +51,16 @@ export function ViewEditor() {
           const model = $likec4model.get().view(id)
           return layout === 'auto' ? model.$view : model.$layouted
         },
-        handleChange: async (viewId, change) => {
-          const event = {
+        handleChange: (viewId, change, meta) => {
+          return likec4rpc.updateView({
             projectId: project.id,
             viewId,
             change,
-          }
-          await likec4rpc.updateView(event)
+            changeId: meta?.changeId,
+          })
+            .then(res => {
+              if (res && res.success === false) throw new Error(res.error ?? 'updateView failed')
+            })
         },
         ...(isAIAvailable && {
           applySemanticLayout: (viewId) => {

@@ -20,8 +20,12 @@ export interface LikeC4EditorCallbacks {
 
   /**
    * Callback invoked when the view changes.
+   *
+   * @param meta - Optional. `meta.changeId` is the ack token the editor waits for:
+   * forward it to the server so the resulting model update can be correlated back.
+   * Ports that omit it fall back to un-correlated acks.
    */
-  handleChange(viewId: t.ViewId, change: t.ViewChange): void | Promise<void>
+  handleChange(viewId: t.ViewId, change: t.ViewChange, meta?: { changeId: string }): void | Promise<void>
 }
 
 export function createLikeC4Editor(callbacks: LikeC4EditorCallbacks): LikeC4EditorCallbacks {

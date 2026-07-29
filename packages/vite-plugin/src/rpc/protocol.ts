@@ -20,7 +20,7 @@ export interface LikeC4VitePluginRpc {
     projectId: ProjectId
     viewId: ViewId
     change: ViewChange
-    changeId?: string
+    changeId?: string | undefined
   }): Promise<{ success: boolean; error?: string }>
 
   /**
@@ -30,7 +30,7 @@ export interface LikeC4VitePluginRpc {
   updateModel(payload: {
     projectId: ProjectId
     change: ModelChange
-    changeId?: string
+    changeId?: string | undefined
   }): Promise<{ success: boolean; error?: string; warnings?: string[] }>
 
   /**
