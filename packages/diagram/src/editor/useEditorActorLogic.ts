@@ -1,11 +1,10 @@
-import type * as t from '@likec4/core/types'
 import { useMemo } from 'react'
 import { isNullish } from 'remeda'
 import { fromPromise } from 'xstate'
 import { useCallbackRef } from '../hooks'
 import { type EditorActorLogic, editorActorLogic } from './actor/machine'
 import type { EditorCalls } from './actor/setup'
-import type { QueuedChange } from './actor/types'
+import { type QueuedChange, isModelChange } from './actor/types'
 import { applyChangesToManualLayout } from './applyChangesToManualLayout'
 import { useOptionalLikeC4Editor } from './LikeC4EditorProvider'
 
@@ -49,18 +48,28 @@ export function useEditorActorLogic(): EditorActorLogic & {
       }
       const applied: QueuedChange[] = []
       const failed: Array<{ item: QueuedChange; error: string }> = []
+      const warnings: string[] = []
       for (const item of input.changes) {
         try {
-          await promisify(() =>
-            port.handleChange(input.viewId, item.change as t.ViewChange, { changeId: item.changeId })
-          )
+          const { change, changeId } = item
+          if (isModelChange(change)) {
+            if (!port.handleModelChange) {
+              throw new Error('Editor port does not support model changes')
+            }
+            const res = await promisify(() => port.handleModelChange!(change, { changeId }))
+            if (res && Array.isArray(res.warnings)) {
+              warnings.push(...res.warnings)
+            }
+          } else {
+            await promisify(() => port.handleChange(input.viewId, change, { changeId }))
+          }
           applied.push(item)
         } catch (error) {
           console.error('Failed to execute change', { item, error })
           failed.push({ item, error: error instanceof Error ? error.message : String(error) })
         }
       }
-      return { requested: input.changes, applied, failed, warnings: [] }
+      return { requested: input.changes, applied, failed, warnings }
     },
   )
 

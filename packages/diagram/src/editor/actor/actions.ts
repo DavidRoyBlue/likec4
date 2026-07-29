@@ -233,6 +233,7 @@ export const pushToSyncQueue = () =>
     let nextOp: SyncOp
     switch (event.type) {
       case 'change.view':
+      case 'change.model':
         nextOp = { changeId: newChangeId(), change: event.change } satisfies QueuedChange
         break
       case 'change.semantic-layout':

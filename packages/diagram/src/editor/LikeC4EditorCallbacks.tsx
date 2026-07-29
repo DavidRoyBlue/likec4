@@ -26,6 +26,18 @@ export interface LikeC4EditorCallbacks {
    * Ports that omit it fall back to un-correlated acks.
    */
   handleChange(viewId: t.ViewId, change: t.ViewChange, meta?: { changeId: string }): void | Promise<void>
+
+  /**
+   * Callback invoked when an element-scoped model change is requested.
+   *
+   * @param meta.changeId - The ack token the editor waits for: forward it to the
+   * server so the resulting model update can be correlated back.
+   * @returns Optionally, warnings surfaced from applying the change.
+   */
+  handleModelChange?: (
+    change: t.ModelChange,
+    meta: { changeId: string },
+  ) => void | Promise<void | { warnings?: string[] }>
 }
 
 export function createLikeC4Editor(callbacks: LikeC4EditorCallbacks): LikeC4EditorCallbacks {

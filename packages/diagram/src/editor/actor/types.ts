@@ -5,6 +5,7 @@ import type { HotKeyEvent } from './hotkey'
 export type EditorActorEvent =
   // Add change to queue
   | { type: 'change.view'; change: t.ViewChange }
+  | { type: 'change.model'; change: t.ModelChange }
   | { type: 'change.semantic-layout' }
   | { type: 'change.latest-to-manual' }
   | { type: 'change.sync-snapshot' }
@@ -65,6 +66,13 @@ export const isQueuedChange = (op: SyncOp | null | undefined): op is QueuedChang
  */
 export const unwrapSyncOp = (op: SyncOp): t.ViewChange | t.ModelChange | Exclude<SyncOp, QueuedChange> =>
   isQueuedChange(op) ? op.change : op
+
+/**
+ * ONE discriminator between `ModelChange` and `ViewChange`, used everywhere -
+ * do not re-declare this check locally.
+ */
+// extend in later phases
+export const isModelChange = (c: t.ViewChange | t.ModelChange): c is t.ModelChange => c.op === 'change-element-property'
 
 export interface EditorActorContext {
   viewId: t.ViewId

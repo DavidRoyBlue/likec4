@@ -356,6 +356,22 @@ export const triggerChange = (viewChange?: ViewChange) =>
     )
   })
 
+/**
+ * Mirrors {@link triggerChange}, but for element-scoped `ModelChange` ops -
+ * these don't move the viewport, so `viewportChangedManually` is left untouched.
+ */
+export const triggerModelChange = () =>
+  machine.enqueueActions(({ event, enqueue }) => {
+    assertEvent(event, 'trigger.model-change')
+    enqueue.sendTo(
+      typedSystem.editorActor,
+      {
+        type: 'change.model',
+        change: event.change,
+      },
+    )
+  })
+
 export const emitOnLayoutTypeChange = () =>
   machine.enqueueActions(({ event, system, context, enqueue }) => {
     if (!context.features.enableCompareWithLatest) {

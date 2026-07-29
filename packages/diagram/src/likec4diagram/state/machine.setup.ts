@@ -13,6 +13,7 @@ import type {
   Fqn,
   LayoutedDynamicView,
   LayoutType,
+  ModelChange,
   NodeId,
   NodeNotation as ElementNotation,
   StepPath,
@@ -259,6 +260,7 @@ export type Events =
   | { type: 'tag.unhighlight' }
   | { type: 'toggle.feature'; feature: TogglableFeature; forceValue?: boolean }
   | { type: 'trigger.change'; change: ViewChange }
+  | { type: 'trigger.model-change'; change: ModelChange }
   | { type: 'emit.onLayoutTypeChange'; layoutType: LayoutType }
   | { type: 'destroy' }
 

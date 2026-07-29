@@ -315,6 +315,10 @@ export class DiagramApi<A extends Any = Unknown> {
     this.send({ type: 'trigger.change', change })
   }
 
+  triggerModelChange(change: t.ModelChange): void {
+    this.send({ type: 'trigger.model-change', change })
+  }
+
   /**
    * Switch dynamic view display variant
    */

@@ -130,4 +130,21 @@ describe('sync queue ack discipline', () => {
     await vi.advanceTimersByTimeAsync(10)
     expect(invocations.length).toBeGreaterThanOrEqual(2)
   })
+
+  it('routes change.model through executeChange', async () => {
+    const executed: any[] = []
+    const actor = makeActor(async (input) => {
+      executed.push(input)
+      return { requested: input.changes, applied: input.changes, failed: [], warnings: [] }
+    })
+    actor.start()
+    actor.send({
+      type: 'change.model',
+      change: { op: 'change-element-property', target: 'sys' as any, title: 'X' },
+    })
+    await new Promise(r => setTimeout(r, 20))
+    expect(executed).toHaveLength(1)
+    expect(executed[0].changes[0].change.op).toBe('change-element-property')
+    expect(executed[0].changes[0].changeId).toBeTypeOf('string')
+  })
 })

@@ -62,6 +62,13 @@ export function ViewEditor() {
               if (res && res.success === false) throw new Error(res.error ?? 'updateView failed')
             })
         },
+        handleModelChange: (change, meta) => {
+          return likec4rpc.updateModel({ projectId: project.id, change, changeId: meta.changeId })
+            .then(res => {
+              if (!res.success) throw new Error(res.error ?? 'updateModel failed')
+              return res.warnings?.length ? { warnings: res.warnings } : undefined
+            })
+        },
         ...(isAIAvailable && {
           applySemanticLayout: (viewId) => {
             return likec4rpc.applySemanticLayout({

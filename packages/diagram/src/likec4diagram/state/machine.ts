@@ -16,6 +16,7 @@ import {
   raiseUpdateView,
   stopEditorActor,
   triggerChange,
+  triggerModelChange,
   updateFeatures,
   updateInputs,
 } from './machine.actions'
@@ -79,6 +80,9 @@ const _diagramMachine = machine.createMachine({
     },
     'trigger.change': {
       actions: triggerChange(),
+    },
+    'trigger.model-change': {
+      actions: triggerModelChange(),
     },
     'emit.onLayoutTypeChange': {
       actions: emitOnLayoutTypeChange(),
