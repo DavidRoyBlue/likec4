@@ -61,5 +61,15 @@ export async function testDoc(expect: ExpectStatic, document: string) {
     return memoryContent!
   }
 
-  return { change, read, fs, services }
+  async function changeModelRaw(params: { change: import('@likec4/core').ModelChange; projectId?: string }) {
+    return await (services.likec4.ModelChanges as any).applyModelChange(params)
+  }
+
+  async function changeModel(params: { change: import('@likec4/core').ModelChange; projectId?: string }) {
+    const res = await changeModelRaw(params)
+    if (!res.success) throw new Error(res.error)
+    return readFromMemory()
+  }
+
+  return { change, read, fs, services, changeModel, changeModelRaw }
 }

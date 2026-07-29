@@ -224,7 +224,10 @@ export function updateTags(
   return edits
 }
 
-export function updateDescriptionProperty(node: PropsBodyNode, description: scalar.MarkdownOrString): TextEdit[] {
+export function updateDescriptionProperty(
+  node: PropsBodyNode,
+  description: scalar.MarkdownOrString | string,
+): TextEdit[] {
   const existing = findExistingProperty(node, 'description')
 
   const descriptionOut = withctx(

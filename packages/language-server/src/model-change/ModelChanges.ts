@@ -7,6 +7,7 @@ import { logger as mainLogger } from '../logger'
 import type { LikeC4ModelLocator, ViewLocateResult } from '../model'
 import type { LikeC4Services } from '../module'
 import type { ChangeView } from '../protocol'
+import { changeElementProperty } from './changeElementProperty'
 import { changeElementStyle } from './changeElementStyle'
 import { changeViewLayout } from './changeViewLayout'
 import { changePropertyHandler, preparePayload } from './viewChange'
@@ -120,6 +121,51 @@ export class LikeC4ModelChanges {
         success: false,
         error,
       }
+    }
+  }
+
+  public async applyModelChange(params: {
+    change: import('@likec4/core').ModelChange
+    projectId?: string | undefined
+  }): Promise<
+    | { success: true; location: import('vscode-languageserver-types').Location | null; warnings?: string[] }
+    | { success: false; error: string }
+  > {
+    const workspace = this.services.shared.workspace
+    try {
+      const project = workspace.ProjectsManager.ensureProject(params.projectId as ProjectId)
+      const change = params.change
+      switch (change.op) {
+        case 'change-element-property': {
+          const located = this.locator.locateElementAst(change.target, project.id)
+          if (!located) {
+            throw new Error(`Element ${change.target} not found in project ${project.id}`)
+          }
+          const { edits, modifiedRange, warnings } = changeElementProperty(this.services, {
+            doc: located.doc,
+            elementAst: located.elementAst,
+            change,
+          })
+          if (!edits.length) {
+            return { success: false, error: 'No changes to apply' }
+          }
+          const applied = await this.applyTextEdits(located.doc, edits)
+          if (!applied) {
+            return { success: false, error: 'Failed to apply changes' }
+          }
+          return {
+            success: true,
+            location: { uri: located.doc.textDocument.uri, range: modifiedRange },
+            ...(warnings.length > 0 && { warnings }),
+          }
+        }
+        default:
+          nonexhaustive(change.op)
+      }
+    } catch (err) {
+      const error = loggable(wrapError(err, `Failed to apply model change ${params.change.op}`))
+      logger.warn(error)
+      return { success: false, error }
     }
   }
 
