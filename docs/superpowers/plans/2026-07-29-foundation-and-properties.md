@@ -19,6 +19,8 @@
 - Conventional commits (`feat:`, `fix:`, `refactor:`, `test:`). One focused commit per task.
 - Do NOT add new runtime dependencies except `@mantine/notifications` (Task 10; already in workspace catalog `catalog:mantine`).
 - `ViewChange` union lives in `packages/core/src/types/view-changes.ts`; keep it untouched except where a task explicitly modifies it.
+- NEVER verify via `node packages/likec4/bin/likec4.mjs` — that entry imports `../dist/` which does not exist in a fresh worktree. The source-mode dev server is `pnpm --filter likec4 dev:example-cloud` (tsx with `--conditions=sources`; picks up edits in diagram/vite-plugin/language-server/spa without building). Note the port it prints.
+- After editing any `package.json` dependencies: run `pnpm install` before any test or typecheck step.
 
 ---
 
@@ -30,7 +32,7 @@
 
 **Interfaces:**
 - Consumes: `scalar.Fqn`, `scalar.Tag`, `scalar.MarkdownOrString` from `./scalar` (same imports style as `view-changes.ts`).
-- Produces: `ModelChange` union and `ModelChange.ChangeElementProperty` — used by Tasks 5, 6, 7, 9, 12. Exact shape:
+- Produces: `ModelChange` union and `ModelChange.ChangeElementProperty` — used by Tasks 5, 6, 7, 9b, 12. Exact shape:
 
 ```ts
 ModelChange = ModelChange.ChangeElementProperty
@@ -38,7 +40,7 @@ ModelChange.ChangeElementProperty = {
   op: 'change-element-property'
   target: scalar.Fqn
   title?: string
-  description?: scalar.MarkdownOrString
+  description?: string | scalar.MarkdownOrString   // plain string prints single-quoted; { md } prints a ''' block
   technology?: string
   tag?: { add?: scalar.Tag | scalar.Tag[]; remove?: scalar.Tag | scalar.Tag[] }
 }
@@ -68,7 +70,11 @@ export namespace ModelChange {
     op: 'change-element-property'
     target: scalar.Fqn
     title?: string
-    description?: scalar.MarkdownOrString
+    /**
+     * Plain string → single-quoted literal; { md } → triple-quoted markdown block.
+     * ops.props.descriptionProperty() accepts both (generators/.../properties.ts:74).
+     */
+    description?: string | scalar.MarkdownOrString
     technology?: string
     tag?: {
       add?: scalar.Tag | scalar.Tag[]
@@ -110,7 +116,7 @@ pnpm fmt && git add -A packages/core && git commit -m "feat(core): add ModelChan
 - Modify: `packages/language-server/src/model-change/viewChange.spec.ts:1-65`
 
 **Interfaces:**
-- Produces: `testDoc(expect: ExpectStatic, document: string)` returning `{ change, changeModel, read, fs, services }` — used by Tasks 4, 5, 6. `change(params: ChangeView.Params)` applies a view change and returns in-memory text; `changeModel(params: ChangeModel.Params)` (added in Task 6 — export a stub now that throws 'not wired until Task 6') ; `read()` asserts memory==disk and returns text; `services` is the full `createTestServices` result services object (needed by Task 4 to reach `ModelLocator`).
+- Produces: `testDoc(expect: ExpectStatic, document: string)` returning `{ change, changeModel, read, fs, services }` — used by Tasks 4, 5, 6. `change(params: ChangeView.Params)` applies a view change and returns in-memory text (Task 5 adds `changeModel`/`changeModelRaw` siblings); `read()` asserts memory==disk and returns text; `services` is the full `createTestServices` result services object (needed by Task 4 to reach `ModelLocator`).
 
 - [ ] **Step 1: Move the harness**
 
@@ -229,7 +235,9 @@ pnpm fmt && git add -A packages/language-server && git commit -m "refactor(langu
 export type WithPropsBody = {
   body?: {
     $cstNode?: ast.LikeC4View['$cstNode']
-    props: Array<{ key: string; $cstNode?: ast.LikeC4View['$cstNode'] }>
+    // key is OPTIONAL: ElementProperty includes MetadataProperty which has no
+    // `key` assignment — Array<ElementProperty> is not assignable otherwise
+    props: Array<{ key?: string | undefined; $cstNode?: ast.LikeC4View['$cstNode'] }>
     tags?: ast.Tags
   } | undefined
 }
@@ -255,7 +263,9 @@ type PropsBodyNode = {
   $cstNode?: ast.LikeC4View['$cstNode']
   body?: {
     $cstNode?: ast.LikeC4View['$cstNode']
-    props: Array<{ key: string; $cstNode?: ast.LikeC4View['$cstNode'] }>
+    // key OPTIONAL — ElementProperty includes MetadataProperty (no key assignment);
+    // findExistingProperty's `p.key === property` comparison stays sound.
+    props: Array<{ key?: string | undefined; $cstNode?: ast.LikeC4View['$cstNode'] }>
     tags?: ast.Tags | undefined
   } | undefined
 }
@@ -333,6 +343,15 @@ public locateElementAst(fqn: c4.Fqn, projectId?: c4.ProjectId): null | {
   elementAst: ast.Element
 }
 ```
+
+- [ ] **Step 0: Install the new dependency FIRST**
+
+Add `"@mantine/notifications": "catalog:mantine"` to `packages/diagram/package.json` dependencies, then:
+
+```bash
+pnpm install
+```
+Without this, every subsequent vitest/typecheck step fails with `Cannot find module '@mantine/notifications'`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -476,6 +495,58 @@ const SPEC = `
 `
 
 describe('change-element-property', () => {
+  it('replaces the POSITIONAL title (parser gives it precedence over body title)', async ({ expect }) => {
+    // Base.ts:598 — `override?.title ?? parseMarkdownAsString(props.title)`:
+    // a positional title string always wins over a body `title` property, so
+    // editing must remove the positional literal and write the body property.
+    const { changeModel, read } = await testDoc(
+      expect,
+      `${SPEC}
+      model {
+        sys = system 'Old Title' {
+          technology 'REST'
+        }
+      }`,
+    )
+    await changeModel({ change: { op: 'change-element-property', target: 'sys' as any, title: 'New Title' } })
+    const text = read()
+    expect(text).toContain(`title 'New Title'`)
+    expect(text).not.toContain('Old Title')
+  })
+
+  it('escapes quotes in written values', async ({ expect }) => {
+    const { changeModel, read } = await testDoc(
+      expect,
+      `${SPEC}
+      model {
+        sys = system 'S' {
+        }
+      }`,
+    )
+    await changeModel({ change: { op: 'change-element-property', target: 'sys' as any, title: "Bob's API" } })
+    const first = read()
+    // must re-parse: a second edit through the full pipeline proves validity
+    await changeModel({ change: { op: 'change-element-property', target: 'sys' as any, technology: 'k8s' } })
+    const text = read()
+    expect(text).toContain('k8s')
+    expect(first).not.toContain("'Bob's API'") // naive unescaped form is invalid DSL
+  })
+
+  it('writes a multi-line markdown description as a triple-quoted block', async ({ expect }) => {
+    const { changeModel, read } = await testDoc(
+      expect,
+      `${SPEC}
+      model {
+        sys = system 'S' {
+        }
+      }`,
+    )
+    await changeModel({
+      change: { op: 'change-element-property', target: 'sys' as any, description: { md: 'line1\nline2' } },
+    })
+    expect(read()).toContain(`'''`)
+  })
+
   it('sets description on element with body', async ({ expect }) => {
     const { changeModel, read } = await testDoc(
       expect,
@@ -638,9 +709,9 @@ function includeRanges(edits: TextEdit[]): Range {
 
 /**
  * If the element was declared braceless (`sys = system 'S'`), we must create
- * a body. All property edits then target positions INSIDE the new body, which
- * does not exist in the CST — so for braceless elements we emit one combined
- * insert instead of delegating to propertyEdits.
+ * a body. All property values are printed via the generators' ops combinators —
+ * NEVER hand-rolled template strings (no escaping, breaks on quotes/markdown).
+ * `change.tag.remove` is a no-op on this path (braceless element has no tags).
  */
 function bracelessBodyEdit(
   elementAst: ast.Element,
@@ -649,21 +720,46 @@ function bracelessBodyEdit(
   const cst = nonNullable(elementAst.$cstNode, 'element cst')
   const indentUnit = ' '.repeat(cst.range.start.character)
   const inner = indentUnit + '  '
-  const lines: string[] = [' {']
+  const parts: string[] = []
   const tagsToAdd = change.tag?.add
     ? (Array.isArray(change.tag.add) ? change.tag.add : [change.tag.add])
     : []
   if (tagsToAdd.length > 0) {
-    lines.push(inner + tagsToAdd.map(t => `#${t}`).join(', '))
+    parts.push(printOperation(withctx({ tags: tagsToAdd }, ops.props.tagsProperty())))
   }
-  if (change.title !== undefined) lines.push(inner + `title '${change.title}'`)
-  if (change.technology !== undefined) lines.push(inner + `technology '${change.technology}'`)
+  if (change.title !== undefined) {
+    parts.push(printOperation(withctx({ title: change.title }, ops.props.titleProperty())))
+  }
+  if (change.technology !== undefined) {
+    parts.push(printOperation(withctx({ technology: change.technology }, ops.props.technologyProperty())))
+  }
   if (change.description !== undefined) {
-    const value = typeof change.description === 'string' ? change.description : change.description.md
-    lines.push(inner + `description '${value}'`)
+    parts.push(printOperation(withctx({ description: change.description }, ops.props.descriptionProperty())))
   }
-  lines.push(indentUnit + '}')
-  return TextEdit.insert(cst.range.end, lines.join('\n'))
+  const body = parts
+    .flatMap(p => p.split('\n'))
+    .map(line => inner + line)
+    .join('\n')
+  return TextEdit.insert(cst.range.end, ' {\n' + body + '\n' + indentUnit + '}')
+}
+// imports needed: { ops, printOperation, withctx } from '@likec4/generators/likec4'
+
+/**
+ * Positional title handling: grammar allows `sys = system 'Title' { ... }`
+ * where the positional string OVERRIDES any body `title` property (see
+ * ModelParser Base.ts:598). Editing the title must therefore DELETE the
+ * positional literal (its CST node is `elementAst.props[0]`), then upsert the
+ * body property. Declaration style changes (`= system 'T'` → `= system` +
+ * body title) — accepted trade-off: reuses vetted printers, adds zero
+ * escaping code, and is idempotent on the second edit.
+ */
+function removePositionalTitle(elementAst: ast.Element): TextEdit | undefined {
+  const positional = elementAst.props?.[0]
+  if (!positional?.$cstNode) {
+    return undefined
+  }
+  // delete from end of the previous token (kind or name) to the literal's end
+  return TextEdit.del(positional.$cstNode.range)
 }
 
 export function changeElementProperty(
@@ -683,6 +779,10 @@ export function changeElementProperty(
 
   const edits: TextEdit[] = []
   if (change.title !== undefined) {
+    const dropPositional = removePositionalTitle(elementAst)
+    if (dropPositional) {
+      edits.push(dropPositional)
+    }
     edits.push(updateTitleProperty(elementAst, change.title))
   }
   if (change.description !== undefined) {
@@ -723,7 +823,7 @@ function collectExtendTagWarnings(
 }
 ```
 
-IMPORTANT adaptation note for the implementer: the exact field names on `ParsedAstExtend` (`ext.id`, `ext.tags`) must be checked against `packages/language-server/src/ast.ts:100-106` and adjusted; the parsed extend records live per-document on `doc.c4ExtendElements`. For cross-document detection, iterate `services.shared.workspace.LangiumDocuments.projectDocuments(projectId)` instead of just `doc` — do this if the accessor is readily available on the services object (it is: `LangiumDocuments` from `../workspace/LangiumDocuments`), passing `projectId` through from the dispatcher in Task 6.
+IMPORTANT adaptation notes for the implementer: (a) the exact grammar assignment holding the positional title on `ast.Element` must be verified in `packages/language-server/src/generated/ast.ts` (grammar `like-c4.langium:126-138` assigns positional strings to `props`; if the generated property differs, adjust `removePositionalTitle` — the parser precedence code to mirror is `Base.ts:598`); (b) the exact field names on `ParsedAstExtend` (`ext.id`, `ext.tags`) must be checked against `packages/language-server/src/ast.ts:100-106` and adjusted; the parsed extend records live per-document on `doc.c4ExtendElements`. For cross-document detection, iterate `services.shared.workspace.LangiumDocuments.projectDocuments(projectId)` instead of just `doc` — do this if the accessor is readily available on the services object (it is: `LangiumDocuments` from `../workspace/LangiumDocuments`), passing `projectId` through from the dispatcher in Task 6.
 
 - [ ] **Step 4: Minimal dispatch to make tests runnable (completed properly in Task 6)**
 
@@ -866,12 +966,14 @@ In `ModelChanges.ts`:
 
 ```ts
 if (expectedVersion !== undefined && doc.textDocument.version !== expectedVersion) {
-  logger.warn`Document ${doc.textDocument.uri} changed underneath (expected v${expectedVersion}, got v${doc.textDocument.version})`
-  return false
+  // THROW (not `return false`): the callers' try/catch converts this into
+  // {success:false, error} with THIS message — a plain false is
+  // indistinguishable from an applyEdit failure and would report the wrong error.
+  throw new Error('Document changed underneath — retry the edit')
 }
 ```
 
-2. Capture `const expectedVersion = located.doc.textDocument.version` immediately after every locate (`locateViewAst` in `applyChange` — line 54 area — and `locateElementAst` in `applyModelChange`) and pass it to `applyTextEdits`. When it returns `false` due to version mismatch, return `{ success: false, error: 'Document changed underneath — retry the edit' }`.
+2. Capture `const expectedVersion = <doc>.textDocument.version` immediately after EVERY locate and pass it to `applyTextEdits`. There are THREE sites: (a) `locateViewAst` in `applyChange` (line 54 area); (b) `locateElementAst` in `applyModelChange`; (c) the `change-property` EARLY-RETURN branch of `applyChange` (lines 26-47) — it locates via `preparePayload(...)` and applies at line 36 without ever reaching the try/catch below, so wrap that branch's apply in its own try/catch (or move the branch inside the existing try) and capture `payload.doc.textDocument.version` right after `preparePayload`. This early-return path is the exact one the spec calls out as unguarded.
 3. Thread `changeId` through: `applyChange`/`applyModelChange` read `params.changeId` and include it in every returned `Res` object.
 
 In `protocol.ts`: add the `ChangeModel` namespace exactly as in Interfaces above (mirror `ChangeView`'s `RequestType` import/pattern verbatim), and add `changeId?: string | undefined` to `ChangeView.Params` + both `Res` variants.
@@ -931,7 +1033,15 @@ updateModel(payload: {
 
 - [ ] **Step 1: Extend shared options + protocol**
 
-In `_shared.ts`, add to `SharedVirtualModuleOptions`: `appliedChanges: Map<string, string>`. In `plugin.ts`, where the options object is constructed (find where `rpcEnabled` and `logger` are assembled into the object passed to virtual modules and `enablePluginRPC`), add `appliedChanges: new Map()`.
+In `_shared.ts`, add to `SharedVirtualModuleOptions`: `appliedChanges: Map<string, string>`.
+
+In `plugin.ts`: the options object is built by `moduleopts<T>()` (~line 223-235), **a function invoked on every virtual-module load and once for `enablePluginRPC`** — putting `new Map()` inside its return literal creates a DIFFERENT map per call and the ack mechanism silently never works. Instead declare ONE instance at module/plugin scope, next to `let rpcEnabled = false` (~line 196):
+
+```ts
+const appliedChanges = new Map<string, string>()
+```
+
+and spread that same instance into `moduleopts`'s returned object (`appliedChanges,`).
 
 In `rpc/protocol.ts`, add `ModelChange` to the type import from `@likec4/core/types` and add the `updateModel` signature; change `updateView`'s return type to `Promise<{ success: boolean; error?: string }>`.
 
@@ -955,17 +1065,25 @@ export async function updateModel(
     k.dim('change'),
     data.change.op,
   ].join(' '))
+  // Record BEFORE applying: DocumentBuilder.update (inside applyModelChange) is
+  // what triggers regeneration of likec4:model/<project>, which READS this map.
+  // Setting after the await races the regeneration and can push a stale ack,
+  // stalling the client queue on its escape hatch.
+  const prev = data.changeId ? appliedChanges.get(data.projectId) : undefined
+  if (data.changeId) {
+    appliedChanges.set(data.projectId, data.changeId)
+  }
   const result = await likec4.editor.applyModelChange({
     change: data.change,
     projectId: data.projectId,
     changeId: data.changeId,
   })
   if (!result.success) {
+    if (data.changeId) {
+      prev === undefined ? appliedChanges.delete(data.projectId) : appliedChanges.set(data.projectId, prev)
+    }
     logger.error(`Failed to apply model change:\n${result.error}`)
     return { success: false, error: result.error }
-  }
-  if (data.changeId) {
-    appliedChanges.set(data.projectId, data.changeId)
   }
   logger.info([k.green('model:onChange'), '✅'].join(' '))
   return { success: true, ...(result.warnings && { warnings: result.warnings }) }
@@ -974,7 +1092,7 @@ export async function updateModel(
 
 In `rpc.ts` register it: `updateModel: (data) => updateModel(params, data),`.
 
-In `updateView.ts`: change to return `{ success: boolean; error?: string }` instead of throwing (keep the error log), and on success record `if (data.changeId) params.appliedChanges.set(data.projectId, data.changeId)`. IMPORTANT: the current implementation throws on failure so birpc rejects the client promise — we now return structured failure instead; Task 9's client code checks `.success`. Also pass `changeId` through to `likec4.editor.applyChange(data)` (the field flows inside `data` already once added to the payload type).
+In `updateView.ts`: change to return `{ success: boolean; error?: string }` instead of throwing (keep the error log), record `changeId` with the same set-before-await + revert-on-failure pattern as `updateModel`, and pass `changeId` through to `likec4.editor.applyChange(data)` (the field flows inside `data` once added to the payload type). NOTE (intentional behavior change): `updateView` no longer throws, so birpc's `onFunctionError` → `sendError` Vite error overlay no longer fires for failed view changes — Task 10's notification replaces it. Keep the `logger.error`.
 
 In `virtuals/rpc.ts` production stub object, add:
 
@@ -984,14 +1102,50 @@ updateModel: () => {
 },
 ```
 
-In `modules.d.ts`, find the `likec4:rpc` module declaration and add `updateModel` to the exported `likec4rpc` type (mirror `updateView`'s declared shape).
+`modules.d.ts` needs NO change for the rpc module — it declares `export const likec4rpc: LikeC4VitePluginRpc` wholesale (line ~174-178), so extending `rpc/protocol.ts` suffices.
 
-- [ ] **Step 3: Typecheck the plugin**
+- [ ] **Step 3: Write the unit spec (vitest infra EXISTS in this package — see src/virtuals/*.spec.ts)**
+
+```ts
+// packages/vite-plugin/src/rpc/functions/updateModel.spec.ts
+import { describe, expect, it } from 'vitest'
+import { updateModel } from './updateModel'
+
+const params = (applyModelChange: any) => ({
+  logger: { info() {}, error() {} },
+  likec4: { editor: { applyModelChange } },
+  appliedChanges: new Map<string, string>(),
+}) as any
+
+describe('updateModel', () => {
+  it('records the changeId, reverting on failure', async () => {
+    const ok = params(async () => ({ success: true, location: null }))
+    await updateModel(ok, {
+      projectId: 'p' as any,
+      change: { op: 'change-element-property', target: 'a' } as any,
+      changeId: 'c1',
+    })
+    expect(ok.appliedChanges.get('p')).toBe('c1')
+
+    const bad = params(async () => ({ success: false, error: 'boom' }))
+    const res = await updateModel(bad, {
+      projectId: 'p' as any,
+      change: { op: 'change-element-property', target: 'a' } as any,
+      changeId: 'c2',
+    })
+    expect(res).toEqual({ success: false, error: 'boom' })
+    expect(bad.appliedChanges.has('p')).toBe(false)
+  })
+})
+```
+
+Run + typecheck:
 
 ```bash
-pnpm exec tsc --build packages/core packages/language-server 2>/dev/null; pnpm --filter @likec4/vite-plugin typecheck
+pnpm --filter @likec4/vite-plugin exec vitest run src/rpc
+pnpm exec tsc --build packages/core packages/language-server; pnpm --filter @likec4/vite-plugin typecheck
 ```
-Expected: clean. (No unit-test infra exists for RPC functions in this package — coverage comes from Task 12's end-to-end verification; do not invent a new harness here.)
+Expected: PASS + clean.
 
 - [ ] **Step 4: Commit**
 
@@ -1005,15 +1159,21 @@ pnpm fmt && git add -A packages/vite-plugin && git commit -m "feat(vite-plugin):
 
 **Files:**
 - Modify: `packages/vite-plugin/src/virtuals/model.ts:6-32`
-- Modify: `packages/likec4-spa/src/context/LikeC4ModelContext.tsx`
-- Modify: `packages/likec4-spa/src/pages/ViewEditor.tsx`
-- Modify: `packages/diagram/src/LikeC4Diagram.props.ts` (add optional prop) and `packages/diagram/src/LikeC4Diagram.tsx` (thread to state)
-- Modify: `packages/diagram/src/likec4diagram/state/types.ts` (context field), `machine.setup.ts`/`machine.ts` (accept via `update.inputs`), `machine.actions.ts:622-630` (`sendSynced` carries it)
+- Modify: `packages/vite-plugin/src/modules.d.ts` (BOTH: the `declare module 'likec4:model/*'` block at ~125-140 gains `$appliedChangeId: ReadableAtom<string | null>`, AND the `loadModel` return type at ~45-51 gains the same)
+- Modify: `packages/likec4-spa/src/routes/_single/route.tsx` (loader returns `$appliedChangeId`)
+- Modify: `packages/likec4-spa/src/routes/project.$projectId/route.tsx` (same)
+- Modify: `packages/likec4-spa/src/context/safeCtx.ts` (second context + `useAppliedChangeIdAtom`)
+- Modify: `packages/likec4-spa/src/context/LikeC4ModelContext.tsx` (accept + provide the atom)
+- Modify: `packages/likec4-spa/src/pages/ViewEditor.tsx` (`useStore` + pass prop)
+- Modify: `packages/diagram/src/LikeC4Diagram.props.ts` (add optional prop) and `packages/diagram/src/LikeC4Diagram.tsx` (pass into `<DiagramActorProvider>`)
+- Modify: `packages/diagram/src/likec4diagram/state/DiagramActorProvider.tsx:88-97` (the `useUpdateEffect` that sends `update.inputs` — THIS is where inputs enter the machine, not LikeC4Diagram)
+- Modify: `packages/diagram/src/likec4diagram/state/machine.setup.ts` (`Input` at ~line 74 gains `appliedChangeId?: string | null` — `Context extends Input` at ~line 91, and the `update.inputs` event type at ~line 227 is `Partial<Omit<Input, 'view'|'xystore'|'dynamicViewVariant'|'features'>>`, so the new field is automatically included; `machine.actions.ts:157-161` `updateInputs()` does `exact({...event.inputs})` — no per-field merge needed)
+- Modify: `packages/diagram/src/likec4diagram/state/machine.actions.ts:622-630` (`sendSynced` carries it)
 - Modify: `packages/diagram/src/editor/actor/types.ts:13` (`view.synched` gains `changeId?`)
 
 **Interfaces:**
 - Consumes: `appliedChanges` map (Task 7).
-- Produces: `view.synched` events carry `changeId: string | null`; `LikeC4Diagram` accepts optional `appliedChangeId?: string | null`. Used by Task 9's queue matching.
+- Produces: `view.synched` events carry `changeId: string | null`; `LikeC4Diagram` accepts optional `appliedChangeId?: string | null`. Used by Task 9a's queue matching.
 
 - [ ] **Step 1: Embed in the generated model module**
 
@@ -1056,14 +1216,26 @@ if (import.meta.hot) {
 
 And in `load()`: `code: projectModelCode(model, project ? (opts.appliedChanges.get(project.id) ?? null) : null)` — match the actual `load({ likec4, project, ...opts })` destructuring in the file; the shared options carry `appliedChanges` (Task 7). Also update the ambient declaration for `likec4:model` in `modules.d.ts` to export `$appliedChangeId: ReadableAtom<string | null>`.
 
-- [ ] **Step 2: Thread through the SPA**
+- [ ] **Step 2: Thread through the SPA (the model module is ONLY reachable via `loadModel(projectId)` in two route loaders)**
 
-`LikeC4ModelContext.tsx` — accept and re-provide nothing new (the atom is imported where needed). Instead, thread at the page level: in `ViewEditor.tsx`, import the atom from the model module (the file already imports from `likec4:rpc`; the model atom comes via route context — find where the route provides `$likec4model` in `src/routes/`, and import `$appliedChangeId` from the same `likec4:model/...` import site; if the model module is only imported in `src/context/safeCtx.ts` or the route files, add the export pass-through there following the existing `$likec4data` pattern). Then:
+1. `src/routes/_single/route.tsx` and `src/routes/project.$projectId/route.tsx`: both loaders already do `const likec4model = await loadModel(projectId)` (or equivalent destructure). Add `$appliedChangeId` to what the loader returns, next to the existing model atom.
+2. `src/context/safeCtx.ts`: add a second context following the existing `LikeC4ModelDataContextProvider`/`useLikeC4ModelAtom` pattern verbatim:
+
+```tsx
+const AppliedChangeIdContext = createContext<ReadableAtom<string | null> | null>(null)
+export const AppliedChangeIdProvider = AppliedChangeIdContext.Provider
+export function useAppliedChangeIdAtom(): ReadableAtom<string | null> {
+  return nonNullable(useContext(AppliedChangeIdContext), 'No AppliedChangeIdContext')
+}
+```
+
+3. `LikeC4ModelContext.tsx`: accept `appliedChangeId: ReadableAtom<string | null>` as a prop and wrap children in `<AppliedChangeIdProvider value={appliedChangeId}>`; the two route files pass the loader value in where they render `<LikeC4ModelContext>`.
+4. `ViewEditor.tsx`:
 
 ```tsx
 import { useStore } from '@nanostores/react'
 // inside ViewEditor():
-const appliedChangeId = useStore($appliedChangeId)
+const appliedChangeId = useStore(useAppliedChangeIdAtom())
 // pass to diagram:
 <LikeC4Diagram
   appliedChangeId={appliedChangeId}
@@ -1073,9 +1245,9 @@ const appliedChangeId = useStore($appliedChangeId)
 - [ ] **Step 3: Diagram prop → machine context → sendSynced**
 
 - `LikeC4Diagram.props.ts`: add `appliedChangeId?: string | null | undefined` with JSDoc "Ack token of the last server-applied change; used by the editor sync queue".
-- `LikeC4Diagram.tsx`: pass it into the same object that flows to the machine via `update.inputs` (find `useUpdateEffect` / the inputs assembly that already forwards props like `view` and features; add `appliedChangeId` alongside).
-- `likec4diagram/state/types.ts` (`DiagramContext`): add `appliedChangeId: string | null`.
-- Where `update.inputs` is assigned in the machine (search `'update.inputs'` in `machine.ts` / `machine.actions.ts`), merge `appliedChangeId: event.inputs.appliedChangeId ?? null`.
+- `LikeC4Diagram.tsx`: pass the prop into `<DiagramActorProvider appliedChangeId={...}>` (~line 193-203).
+- `DiagramActorProvider.tsx`: include `appliedChangeId` in the initial machine `input` AND in the `useUpdateEffect` at lines 88-97 that sends `update.inputs` on prop changes.
+- `machine.setup.ts`: add `appliedChangeId?: string | null` to `Input` (~line 74). `Context extends Input` (~line 91) picks it up; the `update.inputs` event type (~line 227) includes it automatically (it is not in the `Omit` list); `updateInputs()` in `machine.actions.ts:157-161` already spreads `exact({...event.inputs})` — no merge code needed.
 - `machine.actions.ts` `sendSynced` (line 622):
 
 ```ts
@@ -1111,39 +1283,38 @@ pnpm fmt && git add -A packages/vite-plugin packages/likec4-spa packages/diagram
 
 ---
 
-### Task 9: Sync queue — ack matching replaces the 2s timer; `ModelChange` rides the queue
+### Task 9a: Sync queue — `QueuedChange` ack tokens replace the 2s timer (ViewChange-only)
 
 **Files:**
-- Modify: `packages/diagram/src/editor/actor/types.ts` (events, `SyncOp`, context)
-- Modify: `packages/diagram/src/editor/actor/state.sync-queue.ts:279-340`
-- Modify: `packages/diagram/src/editor/actor/setup.ts` (delays + `ExecuteChange` types)
-- Modify: `packages/diagram/src/editor/useEditorActorLogic.ts:39-59`
-- Modify: `packages/diagram/src/editor/LikeC4EditorCallbacks.tsx`
-- Modify: `packages/diagram/src/likec4diagram/state/diagram-api.ts` (add `triggerModelChange`)
-- Modify: `packages/diagram/src/likec4diagram/state/machine.ts` + `machine.actions.ts` (route `trigger.model-change` to editor actor)
-- Modify: `packages/likec4-spa/src/pages/ViewEditor.tsx` (implement `handleModelChange`, forward `changeId`)
+- Modify: `packages/diagram/src/editor/actor/types.ts` (`QueuedChange`, guards, `awaitingAck`, `view.synched {changeId}`)
+- Modify: `packages/diagram/src/editor/actor/actions.ts` (`pushToSyncQueue` unwrapped comparisons, `isLayoutChangeOp`/`withoutSnapshotChanges` at lines 42-49, `newChangeId`)
+- Modify: `packages/diagram/src/editor/actor/state.sync-queue.ts` (wrap BOTH `makeSnapshot` injection sites at lines 140-141 and 193-195, invariant at line 204, `executeChanges` input/onDone, `waitViewSynced`)
+- Modify: `packages/diagram/src/editor/actor/machine.ts` (init `awaitingAck: []`)
+- Modify: `packages/diagram/src/editor/actor/setup.ts` (`ExecuteChange` types)
+- Modify: `packages/diagram/src/editor/useEditorActorLogic.ts` (`meta.changeId` on `handleChange`, keep the `if (!port)` guard)
+- Modify: `packages/diagram/src/editor/LikeC4EditorCallbacks.tsx` (optional `meta` third param on `handleChange`)
+- Modify: `packages/likec4-spa/src/pages/ViewEditor.tsx` (`handleChange` forwards `changeId`, checks `.success`)
 - Test: `packages/diagram/src/editor/actor/state.sync-queue.spec.ts` (create)
 
 **Interfaces:**
-- Consumes: `view.synched {changeId?}` (Task 8), `updateModel` RPC (Task 7), `ModelChange` (Task 1).
-- Produces — the contract every later phase builds on:
+- Consumes: `view.synched {changeId?}` (Task 8).
+- Produces — the contract 9b and later phases build on:
 
 ```ts
 // types.ts
 export type QueuedChange = { changeId: string; change: t.ViewChange | t.ModelChange }
-export type SyncOp = QueuedChange | 'sync-snapshot' | 'apply-semantic-layout' | 'apply-latest-to-manual'
+// STRUCTURAL guard — 'changeId' in op — so a raw ViewChange assigned anywhere
+// becomes a TYPE ERROR instead of silently passing:
 export const isQueuedChange = (op: SyncOp | null): op is QueuedChange =>
-  op !== null && typeof op !== 'string'
-export const isQueuedViewChange = (op: SyncOp | null): op is QueuedChange & { change: t.ViewChange } =>
-  isQueuedChange(op) && !('target' in op.change && op.change.op === 'change-element-property')
-// EditorActorEvent additions:
-| { type: 'change.model'; change: t.ModelChange }
-// context addition:
+  op !== null && typeof op !== 'string' && 'changeId' in op
+export type SyncOp = QueuedChange | 'sync-snapshot' | 'apply-semantic-layout' | 'apply-latest-to-manual'
+// context additions:
 awaitingAck: string[]
+// actions.ts — NOT crypto.randomUUID(): undefined on http://<LAN-IP> (likec4 start --host)
+let seq = 0
+export const newChangeId = () => `c${Date.now().toString(36)}-${++seq}`
 
-// LikeC4EditorCallbacks additions (both optional — vscode-preview untouched):
-handleModelChange?: (change: t.ModelChange, meta: { changeId: string }) => void | Promise<void | { warnings?: string[] }>
-// handleChange gains optional third param:
+// LikeC4EditorCallbacks — optional third param, vscode-preview untouched:
 handleChange(viewId: t.ViewId, change: t.ViewChange, meta?: { changeId: string }): void | Promise<void>
 
 // EditorCalls.ExecuteChange:
@@ -1152,28 +1323,30 @@ Output = {
   requested: QueuedChange[]
   applied: QueuedChange[]
   failed: Array<{ item: QueuedChange; error: string }>
-  warnings: string[]  // success-with-warnings (e.g. tag also set via extend) — surfaced by Task 10
+  warnings: string[]  // populated by 9b; always [] here
 }
-
-// DiagramApi:
-triggerModelChange(change: t.ModelChange): void
 ```
 
-- [ ] **Step 1: Write the failing machine test**
+- [ ] **Step 1: Write the failing tests**
 
 ```ts
 // packages/diagram/src/editor/actor/state.sync-queue.spec.ts
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createActor, fromPromise } from 'xstate'
 import { editorActorLogic } from './machine'
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 function makeActor(executeChangeImpl: (input: any) => Promise<any>) {
-  // minimal fake diagram actor in the same system, providing the snapshot makeSnapshot needs
   const logic = editorActorLogic.provide({
     actors: {
       executeChange: fromPromise(({ input }) => executeChangeImpl(input)),
       applyLatest: fromPromise(async () => ({ updated: {} as any })),
       applySemanticLayout: fromPromise(async () => ({})),
+      // NOTE: Task 10 adds a `refetchView` actor to setup.ts — when implementing
+      // Task 10, extend this helper to also provide it.
     },
   })
   return createActor(logic, { input: { viewId: 'index' as any }, systemId: 'editor' })
@@ -1196,57 +1369,63 @@ describe('sync queue ack discipline', () => {
     const changeId = executed[0].changes[0].changeId
     expect(changeId).toBeTypeOf('string')
 
-    resolveRpc({ requested: executed[0].changes, applied: executed[0].changes, failed: [] })
+    resolveRpc({ requested: executed[0].changes, applied: executed[0].changes, failed: [], warnings: [] })
     await vi.advanceTimersByTimeAsync(10)
 
-    // in waitViewSynced: a NON-matching synched must NOT release the queue
+    // a NON-matching ack must NOT release the queue (old 2000ms fallback would have)
     actor.send({ type: 'view.synched', changeId: 'someone-else' })
-    await vi.advanceTimersByTimeAsync(2500) // old fallback would have fired at 2000
+    await vi.advanceTimersByTimeAsync(2500)
     expect(actor.getSnapshot().matches({ syncQueue: { process: 'waitViewSynced' } })).toBe(true)
 
-    // matching ack releases
     actor.send({ type: 'view.synched', changeId })
     await vi.advanceTimersByTimeAsync(10)
     expect(actor.getSnapshot().matches({ syncQueue: 'idle' })).toBe(true)
-    vi.useRealTimers()
   })
 
-  it('routes change.model through executeChange', async () => {
-    const executed: any[] = []
+  it('does not start the second op before the first is acked (the #2975 duplicate-insert class)', async () => {
+    vi.useFakeTimers()
+    const invocations: string[][] = []
+    let release!: (v: any) => void
     const actor = makeActor(async (input) => {
-      executed.push(input)
-      return { requested: input.changes, applied: input.changes, failed: [] }
+      invocations.push(input.changes.map((c: any) => c.changeId))
+      return await new Promise(r => (release = r))
     })
     actor.start()
-    actor.send({
-      type: 'change.model',
-      change: { op: 'change-element-property', target: 'sys' as any, title: 'X' },
-    })
-    await new Promise(r => setTimeout(r, 20))
-    expect(executed).toHaveLength(1)
-    expect(executed[0].changes[0].change.op).toBe('change-element-property')
+    actor.send({ type: 'change.view', change: { op: 'change-autolayout', layout: { direction: 'TB' } } as any })
+    await vi.advanceTimersByTimeAsync(10)
+    actor.send({ type: 'change.view', change: { op: 'change-autolayout', layout: { direction: 'LR' } } as any })
+    await vi.advanceTimersByTimeAsync(3000)
+    // second op queued, NOT executed against un-acked state
+    expect(invocations).toHaveLength(1)
+    release({ requested: [], applied: [], failed: [], warnings: [] })
+    await vi.advanceTimersByTimeAsync(10)
+    actor.send({ type: 'view.synched', changeId: null })
+    await vi.advanceTimersByTimeAsync(10)
+    expect(invocations.length).toBeGreaterThanOrEqual(2)
   })
 })
 ```
-
-Implementer note: `makeSnapshot` reads the diagram actor from the system (`system.get('diagram')`). These two tests never enqueue `'sync-snapshot'`, so `makeSnapshot` is not called; if any code path trips it in setup, stub `system.get` via providing a fake parent — do NOT weaken the assertions.
 
 - [ ] **Step 2: Run to verify failure**
 
 ```bash
 pnpm --filter @likec4/diagram exec vitest run src/editor/actor/state.sync-queue.spec.ts
 ```
-Expected: FAIL — `change.model` unknown event / no changeId on executed changes / waitViewSynced released at 2000ms.
+Expected: FAIL — no changeId on executed changes; waitViewSynced released at 2000ms.
 
 - [ ] **Step 3: Implement**
 
-1. `types.ts`: apply the Interfaces block above (replace `SyncOp`/`isViewChange`; keep an `isViewChange` alias for `isQueuedViewChange` usages if simpler — but update all imports: `state.sync-queue.ts:16`, `actions.ts:9` usages). Add `awaitingAck: string[]` to `EditorActorContext` and initialize `awaitingAck: []` in the machine's `context` factory (`machine.ts:12-20`).
-2. `actions.ts` `pushToSyncQueue`: wrap every incoming `change.view` / `change.model` payload as `{ changeId: crypto.randomUUID(), change: event.change }` before queueing (coalescing rules unchanged — compare on `change` identity, not wrapper).
-3. `state.sync-queue.ts`:
-   - `idle`/`pending` gain `'change.model'` handling identical to `'change.*'` (the wildcard `change.*` already matches `change.model` — verify the wrapped op reaches `process`; the explicit guard change is in `peekFromQueue`'s dispatch: `isQueuedChange(processing)` → `executeChanges`).
+1. `types.ts`: apply the Interfaces block. Keep `isViewChange` only as `isQueuedChange` alias if it reduces churn, but the STRUCTURAL check (`'changeId' in op`) is mandatory — it is what turns un-wrapped assignments into compile errors. Add `awaitingAck: string[]` to `EditorActorContext`; init `awaitingAck: []` in `machine.ts:12-20`.
+2. `actions.ts`:
+   - Add `newChangeId` (see Interfaces — counter, NOT `crypto.randomUUID`).
+   - `pushToSyncQueue`: build `nextOp = { changeId: newChangeId(), change: event.change }` for `change.view`. CRITICAL — the existing coalescing compares by identity and MUST be rewritten to unwrap: `syncQueue[0] === nextOp` → compare `.change` references where both are `QueuedChange` (`isQueuedChange(a) && isQueuedChange(b) && a.change === b.change`); `isLayoutChangeOp(existingOp)` → `isLayoutChangeOp(isQueuedChange(existingOp) ? existingOp.change : existingOp)`. String sentinels keep identity comparison. Update `isLayoutChangeOp`/`withoutSnapshotChanges` signatures (lines 42-49) accordingly.
+   - `makeSnapshot` callers own the wrapping (next point) — `makeSnapshot` itself is unchanged.
+3. `state.sync-queue.ts` — the TWO raw-injection sites both critics flagged:
+   - Line 140-141 (`peekFromQueue`): `head = { changeId: newChangeId(), change: makeSnapshot(system).change }`.
+   - Line 193-195 (`applyLatestToManual` entry): `processing: { changeId: newChangeId(), change: makeSnapshot(system).change }`.
+   - Line 204 invariant: `invariant(isQueuedChange(current) && current.change.op === 'save-view-snapshot')`, and the `input` below reads `current.change.layout`.
    - `executeChanges.invoke.input`: `changes: [processing, ...syncQueue.filter(isQueuedChange)]`.
-   - `executeChanges.onDone`: set `awaitingAck: event.output.applied.map(i => i.changeId)`; on `failed.length > 0` transition to a new `failureNotify` state (Task 10 fills it — for now route to existing `failure`).
-   - The `lastSyncSnapshot` lookup becomes `findLast(event.output.applied, i => isQueuedViewChange(i) && i.change.op === 'save-view-snapshot')` (adjust property access to `.change.layout.bounds`).
+   - `executeChanges.onDone`: `awaitingAck: event.output.applied.map(i => i.changeId)`; the queue filter keeps identity semantics (wrapper objects are stable): `context.syncQueue.filter(op => !isQueuedChange(op) || !requested.includes(op))`; `lastSyncSnapshot` becomes `findLast(event.output.applied, i => i.change.op === 'save-view-snapshot')` with `.change.layout.bounds`.
    - `waitViewSynced`:
 
 ```ts
@@ -1265,45 +1444,33 @@ waitViewSynced: {
     ],
   },
   after: {
-    // Escape hatch only: server hung or HMR channel dropped
-    30_000: 'decideNext',
+    // Escape hatch only (server hung / HMR channel dropped) — 8s, not 30s:
+    // a stalled drag gesture must not freeze for half a minute.
+    8_000: 'decideNext',
   },
 },
 ```
 
-   Rationale for the `event.changeId == null` release: view updates from sources that don't carry acks (VSCode preview, `applyLatest`) must not deadlock the queue — null acks release it, preserving pre-change behavior everywhere the token isn't threaded.
-4. `setup.ts`: update `EditorCalls.ExecuteChange` types per Interfaces; add nothing to delays (30_000 inline is fine).
-5. `useEditorActorLogic.ts` `executeChange`:
+   Rationale for the `event.changeId == null` release: sources that don't thread acks (VSCode preview, `applyLatest`) must not deadlock the queue.
+4. `setup.ts`: `ExecuteChange` types per Interfaces (declare `warnings: string[]` now; 9a callers return `[]`).
+5. `useEditorActorLogic.ts` `executeChange` — KEEP the existing `if (!port)` guard, then:
 
 ```ts
 const applied: QueuedChange[] = []
 const failed: Array<{ item: QueuedChange; error: string }> = []
-const warnings: string[] = []
 for (const item of input.changes) {
   try {
-    if (isModelChange(item.change)) {
-      if (!port.handleModelChange) {
-        throw new Error('Editor port does not support model changes')
-      }
-      const res = await promisify(() => port.handleModelChange!(item.change as t.ModelChange, { changeId: item.changeId }))
-      if (res && Array.isArray(res.warnings)) {
-        warnings.push(...res.warnings)
-      }
-    } else {
-      await promisify(() => port.handleChange(input.viewId, item.change as t.ViewChange, { changeId: item.changeId }))
-    }
+    await promisify(() => port.handleChange(input.viewId, item.change as t.ViewChange, { changeId: item.changeId }))
     applied.push(item)
   } catch (error) {
     failed.push({ item, error: error instanceof Error ? error.message : String(error) })
   }
 }
-return { requested: input.changes, applied, failed, warnings }
+return { requested: input.changes, applied, failed, warnings: [] }
 ```
 
-   with `const isModelChange = (c: t.ViewChange | t.ModelChange): c is t.ModelChange => c.op === 'change-element-property'` (extend in later phases).
-6. `LikeC4EditorCallbacks.tsx`: add the optional `handleModelChange` + `meta` param per Interfaces.
-7. `diagram-api.ts`: `triggerModelChange(change) { this.send({ type: 'trigger.model-change', change }) }`; diagram machine root: on `'trigger.model-change'` → `sendTo(typedSystem.editorActor, { type: 'change.model', change: event.change })` (mirror the existing `trigger.change` action in `machine.actions.ts` — same enqueue style, same `viewportChangedManually` treatment omitted since model changes don't move the viewport).
-8. `ViewEditor.tsx` editor object:
+6. `LikeC4EditorCallbacks.tsx`: optional `meta` third param on `handleChange` per Interfaces.
+7. `ViewEditor.tsx` `handleChange`:
 
 ```ts
 handleChange: (viewId, change, meta) => {
@@ -1312,6 +1479,112 @@ handleChange: (viewId, change, meta) => {
       if (res && res.success === false) throw new Error(res.error ?? 'updateView failed')
     })
 },
+```
+
+- [ ] **Step 4: Run tests + typecheck (the typecheck IS the regression gate for the injection sites)**
+
+```bash
+pnpm --filter @likec4/diagram exec vitest run src/editor
+pnpm --filter @likec4/diagram typecheck && pnpm --filter @likec4/spa typecheck
+```
+Expected: both new tests PASS; existing editor tests PASS; typecheck clean — note that before step 3.3 the two `makeSnapshot(system).change` assignments FAIL typecheck (structural `QueuedChange` vs raw `ViewChange`); that failure appearing and then disappearing is the proof the wrap landed.
+
+- [ ] **Step 5: Commit**
+
+```bash
+pnpm fmt && git add -A packages/diagram packages/likec4-spa && git commit -m "feat(diagram): ack-token sync discipline replaces fixed sync timer"
+```
+
+---
+
+### Task 9b: `ModelChange` rides the queue
+
+**Files:**
+- Modify: `packages/diagram/src/editor/actor/types.ts` (`change.model` event, `isModelChange` — single source of truth)
+- Modify: `packages/diagram/src/editor/actor/actions.ts` (`pushToSyncQueue` accepts `change.model`)
+- Modify: `packages/diagram/src/editor/useEditorActorLogic.ts` (model branch + warnings)
+- Modify: `packages/diagram/src/editor/LikeC4EditorCallbacks.tsx` (`handleModelChange?`)
+- Modify: `packages/diagram/src/likec4diagram/state/diagram-api.ts` (`triggerModelChange`)
+- Modify: `packages/diagram/src/likec4diagram/state/machine.ts` + `machine.actions.ts` (route `trigger.model-change` → editor actor, mirroring the existing `trigger.change` action)
+- Modify: `packages/likec4-spa/src/pages/ViewEditor.tsx` (`handleModelChange`)
+- Test: extend `packages/diagram/src/editor/actor/state.sync-queue.spec.ts`
+
+**Interfaces:**
+- Consumes: `QueuedChange` pipeline (9a), `updateModel` RPC (Task 7), `ModelChange` (Task 1).
+- Produces:
+
+```ts
+// types.ts — ONE discriminator, used everywhere (do not re-declare locally):
+export const isModelChange = (c: t.ViewChange | t.ModelChange): c is t.ModelChange =>
+  c.op === 'change-element-property'  // extend in later phases
+// event:
+| { type: 'change.model'; change: t.ModelChange }
+
+// LikeC4EditorCallbacks (optional — vscode-preview untouched):
+handleModelChange?: (change: t.ModelChange, meta: { changeId: string }) => void | Promise<void | { warnings?: string[] }>
+
+// DiagramApi:
+triggerModelChange(change: t.ModelChange): void
+```
+
+- [ ] **Step 0: Install the new dependency FIRST**
+
+Add `"@mantine/notifications": "catalog:mantine"` to `packages/diagram/package.json` dependencies, then:
+
+```bash
+pnpm install
+```
+Without this, every subsequent vitest/typecheck step fails with `Cannot find module '@mantine/notifications'`.
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+it('routes change.model through executeChange', async () => {
+  const executed: any[] = []
+  const actor = makeActor(async (input) => {
+    executed.push(input)
+    return { requested: input.changes, applied: input.changes, failed: [], warnings: [] }
+  })
+  actor.start()
+  actor.send({
+    type: 'change.model',
+    change: { op: 'change-element-property', target: 'sys' as any, title: 'X' },
+  })
+  await new Promise(r => setTimeout(r, 20))
+  expect(executed).toHaveLength(1)
+  expect(executed[0].changes[0].change.op).toBe('change-element-property')
+  expect(executed[0].changes[0].changeId).toBeTypeOf('string')
+})
+```
+
+- [ ] **Step 2: Run to verify failure** (`change.model` is an unknown event type)
+
+- [ ] **Step 3: Implement**
+
+1. `types.ts`: add the event and `isModelChange` per Interfaces.
+2. `actions.ts` `pushToSyncQueue`: handle `change.model` identically to `change.view` (wrap with `newChangeId()`); the `change.*` wildcard in `state.sync-queue.ts` already routes it to `process`.
+3. `useEditorActorLogic.ts` `executeChange` — extend the 9a loop's try block:
+
+```ts
+if (isModelChange(item.change)) {
+  if (!port.handleModelChange) {
+    throw new Error('Editor port does not support model changes')
+  }
+  const res = await promisify(() => port.handleModelChange!(item.change, { changeId: item.changeId }))
+  if (res && Array.isArray(res.warnings)) {
+    warnings.push(...res.warnings)
+  }
+} else {
+  await promisify(() => port.handleChange(input.viewId, item.change, { changeId: item.changeId }))
+}
+```
+
+with `const warnings: string[] = []` collected into the output.
+4. `LikeC4EditorCallbacks.tsx`: add optional `handleModelChange` per Interfaces.
+5. `diagram-api.ts`: `triggerModelChange(change) { this.send({ type: 'trigger.model-change', change }) }`. Diagram machine: on `'trigger.model-change'` → `sendTo(typedSystem.editorActor, { type: 'change.model', change: event.change })`, mirroring the existing `trigger.change` action in `machine.actions.ts` (omit the `viewportChangedManually` flag — model changes don't move the viewport).
+6. `ViewEditor.tsx`:
+
+```ts
 handleModelChange: (change, meta) => {
   return likec4rpc.updateModel({ projectId: project.id, change, changeId: meta.changeId })
     .then(res => {
@@ -1327,12 +1600,12 @@ handleModelChange: (change, meta) => {
 pnpm --filter @likec4/diagram exec vitest run src/editor
 pnpm --filter @likec4/diagram typecheck && pnpm --filter @likec4/spa typecheck
 ```
-Expected: new spec PASSES, existing editor tests (`applyChangesToManualLayout.spec.ts`, `__tests__`) still PASS, clean typecheck.
+Expected: PASS + clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-pnpm fmt && git add -A packages/diagram packages/likec4-spa && git commit -m "feat(diagram): ack-token sync discipline, ModelChange through the editor queue"
+pnpm fmt && git add -A packages/diagram packages/likec4-spa && git commit -m "feat(diagram): ModelChange ops ride the editor sync queue"
 ```
 
 ---
@@ -1347,11 +1620,21 @@ pnpm fmt && git add -A packages/diagram packages/likec4-spa && git commit -m "fe
 - Modify: `packages/diagram/src/editor/actor/state.sync-queue.ts` (failure path + warnings surfacing)
 - Modify: `packages/diagram/src/editor/useEditorActorLogic.ts` (provide `refetchView` via `port.fetchView`)
 - Modify: `packages/diagram/src/likec4diagram/DiagramUI.tsx` (mount `<Notifications />` when editor enabled)
+- Modify: `packages/likec4-spa/src/style.css` + `packages/vscode-preview/src/index.css` (notifications styles — the diagram package imports NO mantine css itself; consumers do, via CSS layers)
 - Test: extend `packages/diagram/src/editor/actor/state.sync-queue.spec.ts`
 
 **Interfaces:**
-- Consumes: `failed` array from Task 9's `ExecuteChange.Output`; `port.fetchView(viewId, 'auto')`.
+- Consumes: `failed` array from Task 9a's `ExecuteChange.Output`; `port.fetchView(viewId, 'auto')`.
 - Produces: on any failed change — server-truth restore (`update.view` with refetched view, `source: 'editor'`) + `notifications.show({ color: 'red', title: 'Edit failed', message })`. No silent failures.
+
+- [ ] **Step 0: Install the new dependency FIRST**
+
+Add `"@mantine/notifications": "catalog:mantine"` to `packages/diagram/package.json` dependencies, then:
+
+```bash
+pnpm install
+```
+Without this, every subsequent vitest/typecheck step fails with `Cannot find module '@mantine/notifications'`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1400,11 +1683,18 @@ failureNotify: machine.createStateConfig({
     input: ({ context }) => ({ viewId: context.viewId }),
     onDone: {
       actions: [
-        sendTo(typedSystem.diagramActor, ({ event }) => ({
-          type: 'update.view' as const,
-          view: event.output.view,
-          source: 'editor' as const,
-        })),
+        // GUARDED send: typedSystem.diagramActor is system.get('diagram')! —
+        // in standalone contexts (unit tests, detached actors) there is no
+        // 'diagram' actor and a raw sendTo throws. enqueueActions + check:
+        enqueueActions(({ enqueue, event, system }) => {
+          if ((system as any).get('diagram')) {
+            enqueue.sendTo(typedSystem.diagramActor, {
+              type: 'update.view' as const,
+              view: event.output.view,
+              source: 'editor' as const,
+            })
+          }
+        }),
         ({ context }) => {
           for (const f of context.lastFailures) {
             notifyEditError(f)
@@ -1458,7 +1748,7 @@ export function notifyEditWarning(message: string) {
 Also in `executeChanges.onDone` (success path): when `event.output.warnings.length > 0`, call
 `notifyEditWarning` for each — this is how the spec's "UI surfaces a warning" for extend-tags lands.
 
-4. `DiagramUI.tsx`: import `Notifications` from `@mantine/notifications` and render `<Notifications position="bottom-right" limit={3} />` guarded by `<IfEnabled feature="Editor">` (import from `../context/DiagramFeatures`). Also import `'@mantine/notifications/styles.css'` — check how mantine core styles are handled in this package first (search for `@mantine/core/styles`); mirror that mechanism; if styles are consumed via PandaCSS layers, add the notifications stylesheet the same way.
+4. `DiagramUI.tsx`: import `Notifications` from `@mantine/notifications` and render `<Notifications position="bottom-right" limit={3} />` guarded by `<IfEnabled feature="Editor">` (import from `../context/DiagramFeatures`). STYLES: the diagram package imports no Mantine CSS itself — consumers do, via CSS layer imports. Add `@import "@mantine/notifications/styles.layer.css";` immediately after the existing `@import "@mantine/core/styles.layer.css";` line in BOTH `packages/likec4-spa/src/style.css` (line ~2) and `packages/vscode-preview/src/index.css` (line ~2). Do NOT add a JS side-effect css import inside the library.
 5. Also update the existing `applyLatestToManual.onError` and `applySemanticLayout.onError` blocks to call `notifyEditError({ op: ..., error: String(event.error) })` in addition to their current behavior — the "no console.error-only paths" rule from the spec.
 
 - [ ] **Step 4: Run tests + typecheck**
@@ -1481,7 +1771,7 @@ pnpm fmt && git add -A packages/diagram && git commit -m "feat(diagram): failure
 **Files:**
 - Create: `packages/diagram/src/navigationpanel/editorpanel/EditViewPropertiesButton.tsx`
 - Modify: `packages/diagram/src/navigationpanel/editorpanel/EditorPanel.tsx` (render the new button alongside `ChangeAutoLayoutButton`)
-- Test: `packages/diagram/src/navigationpanel/editorpanel/EditViewPropertiesButton.spec.tsx` (component-level; follow whatever component-test setup exists in the package — search for existing `*.spec.tsx`; if none exists, limit to a logic-only spec of the payload builder below)
+- Test: `packages/diagram/src/navigationpanel/editorpanel/EditViewPropertiesButton.spec.ts` (pure-logic spec of the payload builder — the package has NO jsdom/@testing-library infra; the two existing `.spec.tsx` files use `renderToStaticMarkup` only. Name it `.spec.ts` so nobody attempts rendering.)
 
 **Interfaces:**
 - Consumes: `diagram.triggerChange` (existing), `ViewChange.ChangeProperty` (existing core type), current view via `useDiagram()` / context selectors used by sibling editorpanel components (mirror `ChangeAutoLayoutButton.tsx`'s data access exactly).
@@ -1499,7 +1789,7 @@ export function buildViewPropertyChange(input: {
 
 ```ts
 import { describe, expect, it } from 'vitest'
-import { buildViewPropertyChange } from './EditViewPropertiesButton'
+import { buildViewPropertyChange } from './EditViewPropertiesButton'  // .spec.ts imports the builder only
 
 describe('buildViewPropertyChange', () => {
   it('returns null when nothing changed', () => {
@@ -1557,9 +1847,13 @@ export const EditViewPropertiesButton = () => {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   // sync local state from view when opening
+  // view.description is MarkdownOrString = {txt} | {md}; `?.md` alone silently
+  // drops the {txt} variant (the common `description 'text'` case) — use the
+  // core helper instead:
+  // import { flattenMarkdownOrString } from '@likec4/core' (scalar.ts:53)
   const open = () => {
     setTitle(view.title ?? '')
-    setDescription(typeof view.description === 'string' ? view.description : view.description?.md ?? '')
+    setDescription(flattenMarkdownOrString(view.description) ?? '')
     setOpened(true)
   }
   const save = () => {
@@ -1567,7 +1861,7 @@ export const EditViewPropertiesButton = () => {
       title,
       description,
       originalTitle: view.title,
-      originalDescription: typeof view.description === 'string' ? view.description : view.description?.md ?? null,
+      originalDescription: flattenMarkdownOrString(view.description) ?? null,
     })
     if (change) {
       diagram.triggerChange(change)
@@ -1610,13 +1904,12 @@ Render it in `EditorPanel.tsx` next to `ChangeAutoLayoutButton` (same wrapper ma
 ```bash
 pnpm --filter @likec4/diagram exec vitest run src/navigationpanel && pnpm --filter @likec4/diagram typecheck
 ```
-Then manual: `pnpm --filter likec4 dev:start` — or if that script doesn't exist, build and run the CLI against an example:
+Then manual, via the source-mode dev server (see Global Constraints — never the dist bin):
 
 ```bash
-pnpm --filter @likec4/diagram build && pnpm --filter likec4 build 2>/dev/null || true
-node packages/likec4/bin/likec4.mjs start examples/cloud-system --port 5301
+pnpm --filter likec4 dev:example-cloud
 ```
-Open `http://localhost:5301/view/cloud`, click Edit, open the pencil popover, change the title, save. Verify: `examples/cloud-system/views.c4` gains/updates `title` inside `view cloud`, browser updates without reload. `git checkout examples/` afterwards.
+Open the printed URL at `/view/cloud`, click Edit, open the pencil popover, change the title, save. Verify: `examples/cloud-system/views.c4` gains/updates `title` inside `view cloud`, browser updates without reload. `git checkout examples/` afterwards.
 
 - [ ] **Step 5: Commit**
 
@@ -1633,10 +1926,10 @@ pnpm fmt && git add -A packages/diagram && git commit -m "feat(diagram): edit vi
 - Create: `packages/diagram/src/overlays/element-details/EditableProperty.tsx`
 - Create: `packages/diagram/src/overlays/element-details/ElementTagsEditor.tsx`
 - Modify: `packages/diagram/src/overlays/element-details/ElementDetailsCard.tsx:418-450`
-- Test: `packages/diagram/src/overlays/element-details/EditableProperty.spec.tsx` (payload-builder logic test, same constraint as Task 11)
+- Test: `packages/diagram/src/overlays/element-details/EditableProperty.spec.ts` (payload-builder logic test, pure `.spec.ts` — same constraint as Task 11)
 
 **Interfaces:**
-- Consumes: `diagram.triggerModelChange` (Task 9), `ModelChange.ChangeElementProperty` (Task 1), `elementModel` already in scope in the card (`.id` is the Fqn), `useEnabledFeatures().enableReadOnly`.
+- Consumes: `diagram.triggerModelChange` (Task 9b), `ModelChange.ChangeElementProperty` (Task 1), `elementModel` already in scope in the card (`.id` is the Fqn), `useEnabledFeatures().enableReadOnly`.
 - Produces: exported payload builder:
 
 ```ts
@@ -1784,14 +2077,20 @@ export function EditableProperty({
 }
 ```
 
-`ElementTagsEditor.tsx` — chips for current tags with a remove `x` (when not read-only) and an add-combobox listing specification tags not yet applied. Tag source: `elementModel.tags` (current) and all known tags via `elementModel.$model.specification.tags` (verify the accessor: `grep -n "specification" packages/core/src/model/LikeC4Model.ts` — use whatever public accessor exposes spec tags; if none is public, list tags observed across the model via `[...new Set(model.elements().flatMap(e => e.tags))]` — implementer picks the accessor that exists, test pins the payload only):
+`ElementTagsEditor.tsx` — chips for current tags with a remove `x` (when not read-only) and an add-combobox listing specification tags not yet applied. Tag source: `elementModel.tags` (current); all known tags via `Object.keys(elementModel.$model.specification.tags)` (a `Record<Tag, TagSpecification>`), or `elementModel.$model.tags` (`LikeC4Model.tags`, line ~685) — both exist; pick either:
 
 ```tsx
 // on remove:  diagram.triggerModelChange({ op: 'change-element-property', target, tag: { remove: tagName } })
 // on add:     diagram.triggerModelChange({ op: 'change-element-property', target, tag: { add: tagName } })
 ```
 
-Wire into `ElementDetailsCard.tsx` Properties panel (the region at lines 418–450):
+Wire into `ElementDetailsCard.tsx` Properties panel (the region at lines 418–450). The component does NOT currently read features — add at the top, next to the existing hooks:
+
+```ts
+const { enableReadOnly } = useEnabledFeatures()
+```
+
+(`elementModel.description` is a `RichTextOrEmpty` — its `.md` getter already falls back to the `txt` variant and returns `''` when empty, so `elementModel.description.md || null` is the correct original-value access here; the `typeof === 'string'` branch is dead code, drop it.)
 
 ```tsx
 <>
@@ -1800,9 +2099,7 @@ Wire into `ElementDetailsCard.tsx` Properties panel (the region at lines 418–4
     target={elementModel.id}
     field="description"
     multiline
-    original={typeof elementModel.description === 'string'
-      ? elementModel.description
-      : elementModel.description?.md ?? null}>
+    original={elementModel.description.md || null}>
     <Markdown value={elementModel.description} emptyText="no description" />
   </EditableProperty>
 </>
@@ -1826,10 +2123,10 @@ Wire into `ElementDetailsCard.tsx` Properties panel (the region at lines 418–4
 pnpm --filter @likec4/diagram exec vitest run src/overlays src/editor && pnpm --filter @likec4/diagram typecheck
 ```
 
-End-to-end (the phase's definition of done):
+End-to-end (the phase's definition of done), via the source-mode dev server:
 
 ```bash
-node packages/likec4/bin/likec4.mjs start examples/cloud-system --port 5301
+pnpm --filter likec4 dev:example-cloud
 ```
 1. Open a view → click a node → Open details → Properties tab shows pencil affordances (edit mode on).
 2. Edit description → Ctrl+Enter → within ~1s the card re-renders from HMR; `git diff examples/` shows exactly one `description` change inside the right element in the right file, comments intact.
