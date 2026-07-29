@@ -14,6 +14,7 @@ import { Disposable, interruptAndCheck, URI, UriUtils } from 'langium'
 import { DiagnosticSeverity } from 'vscode-languageserver-protocol'
 import {
   BuildDocuments,
+  ChangeModel,
   ChangeView,
   DidChangeModelNotification,
   DidChangeProjectsNotification,
@@ -328,6 +329,10 @@ export class Rpc extends ADisposable {
       connection.onRequest(ChangeView.req, async (request) => {
         logger.debug`received request ${'changeView'} of ${request.viewId} from project ${request.projectId}`
         return await likec4Services.ModelChanges.applyChange(request)
+      }),
+      // ----------
+      connection.onRequest(ChangeModel.req, async (params) => {
+        return await likec4Services.ModelChanges.applyModelChange(params)
       }),
       // ----------
       connection.onRequest(FetchTelemetryMetrics.req, async (cancelToken) => {

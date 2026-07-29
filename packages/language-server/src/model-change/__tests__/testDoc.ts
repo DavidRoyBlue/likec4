@@ -4,7 +4,7 @@ import stripIndent from 'strip-indent'
 import { type ExpectStatic, vi } from 'vitest'
 import { URI } from 'vscode-uri'
 import { WithFileSystem } from '../../filesystem'
-import type { ChangeView } from '../../protocol'
+import type { ChangeModel, ChangeView } from '../../protocol'
 import { createTestServices } from '../../test'
 
 vi.mock('node:fs')
@@ -61,11 +61,11 @@ export async function testDoc(expect: ExpectStatic, document: string) {
     return memoryContent!
   }
 
-  async function changeModelRaw(params: { change: import('@likec4/core').ModelChange; projectId?: string }) {
-    return await (services.likec4.ModelChanges as any).applyModelChange(params)
+  async function changeModelRaw(params: ChangeModel.Params) {
+    return await services.likec4.ModelChanges.applyModelChange(params)
   }
 
-  async function changeModel(params: { change: import('@likec4/core').ModelChange; projectId?: string }) {
+  async function changeModel(params: ChangeModel.Params) {
     const res = await changeModelRaw(params)
     if (!res.success) throw new Error(res.error)
     return readFromMemory()

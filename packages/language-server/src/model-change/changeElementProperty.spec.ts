@@ -181,9 +181,37 @@ describe('change-element-property', () => {
     const res = await changeModelRaw({
       change: { op: 'change-element-property', target: 'sys' as any, tag: { add: 'alpha' as any } },
     })
-    expect(res.success).toBe(true)
+    if (!res.success) throw new Error(res.error)
     expect(res.warnings ?? []).toEqual([
       expect.stringContaining('alpha'),
     ])
+  })
+
+  it('rejects apply when the document changed between locate and apply (version guard)', async ({ expect }) => {
+    const { services, changeModelRaw } = await testDoc(
+      expect,
+      `
+      specification { element system }
+      model {
+        sys = system 'S' {
+          description 'old'
+        }
+      }`,
+    )
+    // Monkey-patch applyTextEdits' precondition path: simulate concurrent edit by
+    // bumping the document version after locate but before apply.
+    const mc = services.likec4.ModelChanges as any
+    const originalApply = mc.applyTextEdits.bind(mc)
+    mc.applyTextEdits = async (doc: any, edits: any, expectedVersion?: number) => {
+      // simulate another writer landing first
+      doc.textDocument._version = (doc.textDocument.version ?? 0) + 1
+      return originalApply(doc, edits, expectedVersion)
+    }
+    const res = await changeModelRaw({
+      change: { op: 'change-element-property', target: 'sys' as any, description: 'new' },
+    })
+    expect(res.success).toBe(false)
+    if (res.success) throw new Error('expected apply to fail')
+    expect(res.error).toContain('changed')
   })
 })

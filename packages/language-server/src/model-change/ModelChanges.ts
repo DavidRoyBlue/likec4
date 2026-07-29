@@ -6,7 +6,7 @@ import type { ParsedLikeC4LangiumDocument } from '../ast'
 import { logger as mainLogger } from '../logger'
 import type { LikeC4ModelLocator, ViewLocateResult } from '../model'
 import type { LikeC4Services } from '../module'
-import type { ChangeView } from '../protocol'
+import type { ChangeModel, ChangeView } from '../protocol'
 import { changeElementProperty } from './changeElementProperty'
 import { changeElementStyle } from './changeElementStyle'
 import { changeViewLayout } from './changeViewLayout'
@@ -22,28 +22,47 @@ export class LikeC4ModelChanges {
   }
 
   public async applyChange(changeView: ChangeView.Params): Promise<ChangeView.Res> {
-    let { viewId, projectId: _projectId, change } = changeView
+    let { viewId, projectId: _projectId, change, changeId } = changeView
 
     if (change.op === 'change-property') {
-      const payload = preparePayload(changeView, this.services)
-      const res = changePropertyHandler(payload)
-      if (!res) {
+      try {
+        const payload = preparePayload(changeView, this.services)
+        const expectedVersion = payload.doc.textDocument.version
+        const res = changePropertyHandler(payload)
+        if (!res) {
+          return {
+            success: false,
+            error: 'No changes to apply',
+            ...(changeId !== undefined && { changeId }),
+          }
+        }
+        const edits = Array.isArray(res) ? res : [res]
+        const applyResult = await this.applyTextEdits(payload.doc, edits, expectedVersion)
+        if (!applyResult) {
+          return {
+            success: false,
+            error: 'Failed to apply text edits',
+            ...(changeId !== undefined && { changeId }),
+          }
+        }
+        return {
+          success: true,
+          location: null,
+          ...(changeId !== undefined && { changeId }),
+        }
+      } catch (err) {
+        const error = loggable(
+          wrapError(
+            err,
+            `Failed to apply change ${changeView.change.op} ${changeView.viewId}`,
+          ),
+        )
+        logger.warn(error)
         return {
           success: false,
-          error: 'No changes to apply',
+          error,
+          ...(changeId !== undefined && { changeId }),
         }
-      }
-      const edits = Array.isArray(res) ? res : [res]
-      const applyResult = await this.applyTextEdits(payload.doc, edits)
-      if (!applyResult) {
-        return {
-          success: false,
-          error: 'Failed to apply text edits',
-        }
-      }
-      return {
-        success: true,
-        location: null,
       }
     }
 
@@ -56,6 +75,7 @@ export class LikeC4ModelChanges {
       if (!lookup) {
         throw new Error(`View ${viewId} not found in project ${project.id}`)
       }
+      const expectedVersion = lookup.doc.textDocument.version
       const textDocument = {
         uri: lookup.doc.textDocument.uri,
         version: lookup.doc.textDocument.version,
@@ -70,6 +90,7 @@ export class LikeC4ModelChanges {
         return {
           success: true,
           location,
+          ...(changeId !== undefined && { changeId }),
         }
       }
 
@@ -78,6 +99,7 @@ export class LikeC4ModelChanges {
         return {
           success: true,
           location,
+          ...(changeId !== undefined && { changeId }),
         }
       }
 
@@ -90,15 +112,17 @@ export class LikeC4ModelChanges {
         return {
           success: false,
           error: 'No changes to apply',
+          ...(changeId !== undefined && { changeId }),
         }
       }
 
       // Apply the text edits to the document
-      const applyResult = await this.applyTextEdits(lookup.doc, edits)
+      const applyResult = await this.applyTextEdits(lookup.doc, edits, expectedVersion)
       if (!applyResult) {
         return {
           success: false,
           error: `Failed to apply changes`,
+          ...(changeId !== undefined && { changeId }),
         }
       }
 
@@ -108,6 +132,7 @@ export class LikeC4ModelChanges {
           uri: textDocument.uri,
           range: modifiedRange,
         },
+        ...(changeId !== undefined && { changeId }),
       }
     } catch (err) {
       const error = loggable(
@@ -120,18 +145,14 @@ export class LikeC4ModelChanges {
       return {
         success: false,
         error,
+        ...(changeId !== undefined && { changeId }),
       }
     }
   }
 
-  public async applyModelChange(params: {
-    change: import('@likec4/core').ModelChange
-    projectId?: string | undefined
-  }): Promise<
-    | { success: true; location: import('vscode-languageserver-types').Location | null; warnings?: string[] }
-    | { success: false; error: string }
-  > {
+  public async applyModelChange(params: ChangeModel.Params): Promise<ChangeModel.Res> {
     const workspace = this.services.shared.workspace
+    const changeId = params.changeId
     try {
       const project = workspace.ProjectsManager.ensureProject(params.projectId as ProjectId)
       const change = params.change
@@ -141,21 +162,23 @@ export class LikeC4ModelChanges {
           if (!located) {
             throw new Error(`Element ${change.target} not found in project ${project.id}`)
           }
+          const expectedVersion = located.doc.textDocument.version
           const { edits, modifiedRange, warnings } = changeElementProperty(this.services, {
             doc: located.doc,
             elementAst: located.elementAst,
             change,
           })
           if (!edits.length) {
-            return { success: false, error: 'No changes to apply' }
+            return { success: false, error: 'No changes to apply', ...(changeId !== undefined && { changeId }) }
           }
-          const applied = await this.applyTextEdits(located.doc, edits)
+          const applied = await this.applyTextEdits(located.doc, edits, expectedVersion)
           if (!applied) {
-            return { success: false, error: 'Failed to apply changes' }
+            return { success: false, error: 'Failed to apply changes', ...(changeId !== undefined && { changeId }) }
           }
           return {
             success: true,
             location: { uri: located.doc.textDocument.uri, range: modifiedRange },
+            ...(changeId !== undefined && { changeId }),
             ...(warnings.length > 0 && { warnings }),
           }
         }
@@ -165,7 +188,7 @@ export class LikeC4ModelChanges {
     } catch (err) {
       const error = loggable(wrapError(err, `Failed to apply model change ${params.change.op}`))
       logger.warn(error)
-      return { success: false, error }
+      return { success: false, error, ...(changeId !== undefined && { changeId }) }
     }
   }
 
@@ -199,7 +222,17 @@ export class LikeC4ModelChanges {
     }
   }
 
-  protected async applyTextEdits(doc: ParsedLikeC4LangiumDocument, edits: TextEdit[]): Promise<boolean> {
+  protected async applyTextEdits(
+    doc: ParsedLikeC4LangiumDocument,
+    edits: TextEdit[],
+    expectedVersion?: number,
+  ): Promise<boolean> {
+    if (expectedVersion !== undefined && doc.textDocument.version !== expectedVersion) {
+      // THROW (not `return false`): the callers' try/catch converts this into
+      // {success:false, error} with THIS message — a plain false is
+      // indistinguishable from an applyEdit failure and would report the wrong error.
+      throw new Error('Document changed underneath — retry the edit')
+    }
     const lsp = this.services.shared.lsp.Connection
     const workspace = this.services.shared.workspace
     if (!lsp) {

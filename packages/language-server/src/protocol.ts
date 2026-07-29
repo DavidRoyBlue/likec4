@@ -7,6 +7,7 @@ import type {
   Fqn,
   LayoutedLikeC4ModelData,
   LayoutedProjectsView,
+  ModelChange,
   NonEmptyArray,
   ProjectId,
   RelationId,
@@ -285,17 +286,37 @@ export namespace ChangeView {
     viewId: ViewId
     change: ViewChange
     projectId?: string | undefined
+    changeId?: string | undefined
   }
   export type Res = {
     success: true
     location: Location | null
+    changeId?: string
   } | {
     success: false
     location?: Location | null
     error: string
+    changeId?: string
   }
 
   export const req = new RequestType<Params, Res, void>('likec4/change-view')
+  export type Req = typeof req
+}
+
+/**
+ * Request to apply a model-scoped change (element/relationship/deployment edits).
+ * If LSP has multiple projects, the projectId is required.
+ */
+export namespace ChangeModel {
+  export type Params = {
+    change: ModelChange
+    projectId?: string | undefined
+    changeId?: string | undefined
+  }
+  export type Res =
+    | { success: true; location: Location | null; changeId?: string; warnings?: string[] }
+    | { success: false; error: string; changeId?: string }
+  export const req = new RequestType<Params, Res, void>('likec4/change-model')
   export type Req = typeof req
 }
 
