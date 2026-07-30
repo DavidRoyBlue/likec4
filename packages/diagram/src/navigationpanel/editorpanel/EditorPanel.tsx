@@ -6,6 +6,7 @@ import { useEnabledFeatures } from '../../context'
 import { ApplySemanticLayout } from './ApplySemanticLayout'
 import { CenterCamera } from './CenterCamera'
 import { ChangeAutoLayoutButton } from './ChangeAutoLayoutButton'
+import { EditViewPropertiesButton } from './EditViewPropertiesButton'
 import { ManualLayoutToolsButton } from './ManualLayoutToolsButton'
 import { ToggleReadonly } from './ToggleReadonly'
 
@@ -53,6 +54,7 @@ export function EditorPanel() {
         >
           <TooltipGroup openDelay={600} closeDelay={120}>
             <ChangeAutoLayoutButton />
+            <EditViewPropertiesButton />
             <ManualLayoutToolsButton />
             <CenterCamera />
             <ToggleReadonly />
