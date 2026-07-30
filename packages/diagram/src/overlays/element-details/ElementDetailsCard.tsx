@@ -25,7 +25,6 @@ import {
   Box,
   CloseButton,
   Divider as MantineDivider,
-  Flex,
   Group,
   RemoveScroll,
   ScrollArea,
@@ -45,17 +44,18 @@ import { IconExternalLink, IconFileSymlink, IconStack2, IconZoomScan } from '@ta
 import type { Rect } from '@xyflow/system'
 import { type PanInfo, m, useDragControls, useMotionValue } from 'motion/react'
 import { type PropsWithChildren, type SyntheticEvent, useCallback, useRef, useState } from 'react'
-import { clamp, entries, isNullish, map, only, partition, pipe } from 'remeda'
+import { clamp, entries, isNullish, keys, map, only, partition, pipe } from 'remeda'
 import { Markdown } from '../../base-primitives'
-import { ElementTag } from '../../base-primitives/element/ElementTags'
 import { Link } from '../../components/Link'
-import { DiagramFeatures, IconRenderer, IfEnabled } from '../../context'
+import { DiagramFeatures, IconRenderer, IfEnabled, useEnabledFeatures } from '../../context'
 import { useCallbackRef, useUpdateEffect } from '../../hooks'
 import { useCurrentViewModel } from '../../hooks/useCurrentViewModel'
 import { useDiagram } from '../../hooks/useDiagram'
 import type { OnNavigateTo } from '../../LikeC4Diagram.props'
 import { stopPropagation } from '../../utils'
+import { EditableProperty } from './EditableProperty'
 import * as styles from './ElementDetailsCard.css'
+import { ElementTagsEditor } from './ElementTagsEditor'
 import { MetadataProvider, MetadataValue } from './MetadataValue'
 import { TabPanelDeployments } from './TabPanelDeployments'
 import { TabPanelRelationships } from './TabPanelRelationships'
@@ -120,6 +120,7 @@ export function ElementDetailsCard({
     key: `likec4:element-details:active-tab`,
     defaultValue: 'Properties',
   })
+  const { enableReadOnly } = useEnabledFeatures()
   const diagram = useDiagram()
   const viewModel = useCurrentViewModel()
   const nodeModel = fromNode ? viewModel.findNode(fromNode) : viewModel.findNodeWithElement(fqn)
@@ -306,13 +307,15 @@ export function ElementDetailsCard({
               >
                 {elementIcon}
                 <div style={{ minWidth: 0, overflow: 'hidden' }}>
-                  <Tooltip label={elementModel.title} openDelay={600} position="bottom-start">
-                    <Text
-                      component={'div'}
-                      className={styles.title}>
-                      {elementModel.title}
-                    </Text>
-                  </Tooltip>
+                  <EditableProperty target={elementModel.id} field="title" original={elementModel.title}>
+                    <Tooltip label={elementModel.title} openDelay={600} position="bottom-start">
+                      <Text
+                        component={'div'}
+                        className={styles.title}>
+                        {elementModel.title}
+                      </Text>
+                    </Tooltip>
+                  </EditableProperty>
                   {notation && (
                     <Text component="div" c={'dimmed'} fz={'sm'} fw={500} lh={1.3} lineClamp={1}>
                       {notation}
@@ -343,9 +346,11 @@ export function ElementDetailsCard({
               </div>
               <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                 <SmallLabel>tags</SmallLabel>
-                <ElementTags
+                <ElementTagsEditor
+                  target={elementModel.id}
                   tags={elementModel.tags}
-                  onClick={tag => diagram.openSearch(`#${tag}`)} />
+                  specTags={keys(elementModel.$model.specification.tags)}
+                  onTagClick={tag => diagram.openSearch(`#${tag}`)} />
               </div>
               <ActionIconGroup
                 style={{
@@ -426,14 +431,22 @@ export function ElementDetailsCard({
                     )}
                     <>
                       <PropertyLabel>description</PropertyLabel>
-                      <Markdown
-                        value={elementModel.description}
-                        emptyText="no description"
-                      />
+                      <EditableProperty
+                        target={elementModel.id}
+                        field="description"
+                        multiline
+                        original={elementModel.description.md || null}>
+                        <Markdown value={elementModel.description} emptyText="no description" />
+                      </EditableProperty>
                     </>
-                    {elementModel.technology && (
+                    {(elementModel.technology || !enableReadOnly) && (
                       <ElementProperty title="technology">
-                        {elementModel.technology}
+                        <EditableProperty
+                          target={elementModel.id}
+                          field="technology"
+                          original={elementModel.technology ?? null}>
+                          {elementModel.technology ?? '—'}
+                        </EditableProperty>
                       </ElementProperty>
                     )}
                     {elementModel.links.length > 0 && (
@@ -611,24 +624,5 @@ function ElementMetata({
         </Box>
       </>
     </MetadataProvider>
-  )
-}
-
-function ElementTags({ tags, onClick }: { tags: readonly string[]; onClick: (tag: string) => void }) {
-  return (
-    <Flex gap={4} flex={1} mt={6} wrap="wrap">
-      {tags.map((tag) => (
-        <ElementTag
-          key={tag}
-          tag={tag}
-          cursor="pointer"
-          onClick={e => {
-            e.stopPropagation()
-            onClick(tag)
-          }}
-        />
-      ))}
-      {tags.length === 0 && <Badge radius={'sm'} size="sm" fw={600} color="gray">—</Badge>}
-    </Flex>
   )
 }

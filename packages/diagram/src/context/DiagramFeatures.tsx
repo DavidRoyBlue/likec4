@@ -110,7 +110,6 @@ export function DiagramFeatures({
 
 const overridesForOverlays: Partial<EnabledFeatures> = {
   enableControls: false,
-  enableReadOnly: true,
   enableAISemanticLayout: false,
   enableCompareWithLatest: false,
 }
