@@ -2,13 +2,20 @@ import type { Fqn, ModelChange } from '@likec4/core/types'
 import { ActionIcon, Textarea, TextInput } from '@mantine/core'
 import { IconPencil } from '@tabler/icons-react'
 import { type ChangeEvent, type KeyboardEvent, type PropsWithChildren, useEffect, useState } from 'react'
-import { useEnabledFeatures } from '../../context/DiagramFeatures'
+import { useCanEditModel } from '../../context/DiagramFeatures'
 import { useDiagram } from '../../hooks/useDiagram'
 
 /**
  * Builds a `ModelChange.ChangeElementProperty` payload for a single edited field.
  * Returns `null` when the edited value is unchanged from the original, so callers
  * can skip triggering a no-op model change.
+ *
+ * `description` is always sent as `{ md: value }` — the textarea is labelled
+ * "Markdown", and a plain string would be printed as a single-quoted literal and
+ * come back as `{ txt }`, rendering the markdown literally. Same ruling as
+ * `buildViewPropertyChange` in navigationpanel/editorpanel/EditViewPropertiesButton.
+ * `original` stays a plain string on both sides, so the unchanged → `null` guard
+ * above is unaffected.
  */
 export function buildElementPropertyChange(input: {
   target: Fqn
@@ -18,6 +25,13 @@ export function buildElementPropertyChange(input: {
 }): ModelChange.ChangeElementProperty | null {
   if (input.value === (input.original ?? '')) {
     return null
+  }
+  if (input.field === 'description') {
+    return {
+      op: 'change-element-property',
+      target: input.target,
+      description: { md: input.value },
+    }
   }
   return {
     op: 'change-element-property',
@@ -35,7 +49,8 @@ type EditablePropertyProps = PropsWithChildren<{
 
 /**
  * Pencil-toggled inline editor for a single element property (title, description, technology).
- * Renders children read-only (no pencil) when the diagram is read-only.
+ * Renders children read-only (no pencil) when the diagram is read-only OR the editor
+ * port does not support model changes (see `useCanEditModel`).
  * Commits on blur or Ctrl+Enter (multiline) / Enter (single-line); Esc cancels.
  */
 export function EditableProperty({
@@ -45,7 +60,7 @@ export function EditableProperty({
   multiline = false,
   children,
 }: EditablePropertyProps) {
-  const { enableReadOnly } = useEnabledFeatures()
+  const canEdit = useCanEditModel()
   const diagram = useDiagram()
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState('')
@@ -72,7 +87,7 @@ export function EditableProperty({
     return () => document.removeEventListener('keydown', onDocumentKeyDownCapture, { capture: true })
   }, [editing])
 
-  if (enableReadOnly) {
+  if (!canEdit) {
     return <>{children}</>
   }
 

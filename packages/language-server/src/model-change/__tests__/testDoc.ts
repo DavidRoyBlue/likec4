@@ -71,5 +71,15 @@ export async function testDoc(expect: ExpectStatic, document: string) {
     return readFromMemory()
   }
 
-  return { change, read, fs, services, changeModel, changeModelRaw }
+  /**
+   * Re-parses the (already updated) documents and returns the parsed element —
+   * the only way to assert what the model ACTUALLY sees after an edit, e.g. that
+   * a positional string is no longer shadowing a body property.
+   */
+  async function parsedElement(fqn: string) {
+    const model = await services.likec4.ModelBuilder.parseModel()
+    return model?.$data.elements[fqn]
+  }
+
+  return { change, read, fs, services, changeModel, changeModelRaw, parsedElement }
 }

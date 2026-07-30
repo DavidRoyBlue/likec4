@@ -13,6 +13,15 @@ const SPEC = `
   }
 `
 
+// Separate spec for the positional-run tests — keeps SPEC (and the inline
+// snapshot that echoes it) untouched.
+const SPEC_WITH_ACTOR = `
+  specification {
+    element actor
+    element container
+  }
+`
+
 describe('change-element-property', () => {
   it('replaces the POSITIONAL title (parser gives it precedence over body title)', async ({ expect }) => {
     // Base.ts:598 — `override?.title ?? parseMarkdownAsString(props.title)`:
@@ -31,6 +40,93 @@ describe('change-element-property', () => {
     const text = read()
     expect(text).toContain(`title 'New Title'`)
     expect(text).not.toContain('Old Title')
+  })
+
+  it('collapses a 2-positional run on title edit (cloud-system pattern)', async ({ expect }) => {
+    // examples/cloud-system/model.c4:3 — `actor 'Title' 'Summary'`.
+    // Deleting only props[0] would promote 'Interacts with the system' into the
+    // TITLE slot and silently override the body title we just wrote.
+    const { changeModel, read, parsedElement } = await testDoc(
+      expect,
+      `${SPEC_WITH_ACTOR}
+      model {
+        customer = actor 'Cloud System Customer' 'Interacts with the system' {
+          description 'Long description'
+        }
+      }`,
+    )
+    await changeModel({ change: { op: 'change-element-property', target: 'customer' as any, title: 'Renamed' } })
+    const text = read()
+    expect(text).toContain(`title 'Renamed'`)
+    expect(text).toContain(`summary 'Interacts with the system'`)
+    // no positional left on the declaration line
+    expect(text).toContain('customer = actor {')
+    expect(text).not.toContain(`'Cloud System Customer'`)
+
+    const parsed = await parsedElement('customer')
+    expect(parsed?.title).toBe('Renamed')
+    expect(parsed?.summary).toEqual({ txt: 'Interacts with the system' })
+    expect(parsed?.description).toEqual({ txt: 'Long description' })
+  })
+
+  it('collapses a 3-positional run on technology edit (no silent shadowing)', async ({ expect }) => {
+    const { changeModel, read, parsedElement } = await testDoc(
+      expect,
+      `${SPEC_WITH_ACTOR}
+      model {
+        api = container 'API' 'Public API' 'REST' {
+          description 'The API'
+        }
+      }`,
+    )
+    await changeModel({ change: { op: 'change-element-property', target: 'api' as any, technology: 'gRPC' } })
+    const text = read()
+    expect(text).toContain('api = container {')
+    expect(text).toContain(`technology 'gRPC'`)
+    expect(text).not.toContain(`'REST'`)
+
+    const parsed = await parsedElement('api')
+    // the edited value actually takes effect — not shadowed by props[2]
+    expect(parsed?.technology).toBe('gRPC')
+    // displaced slots survive
+    expect(parsed?.title).toBe('API')
+    expect(parsed?.summary).toEqual({ txt: 'Public API' })
+    expect(parsed?.description).toEqual({ txt: 'The API' })
+  })
+
+  it('leaves the positional run alone when nothing it shadows is edited', async ({ expect }) => {
+    const { changeModel, read, parsedElement } = await testDoc(
+      expect,
+      `${SPEC_WITH_ACTOR}
+      model {
+        customer = actor 'Customer' 'Interacts' {
+        }
+      }`,
+    )
+    // description is NOT shadowed (slot 1 is `summary`), so no collapse needed
+    await changeModel({ change: { op: 'change-element-property', target: 'customer' as any, description: 'Note' } })
+    const text = read()
+    expect(text).toContain(`customer = actor 'Customer' 'Interacts' {`)
+    const parsed = await parsedElement('customer')
+    expect(parsed?.title).toBe('Customer')
+    expect(parsed?.description).toEqual({ txt: 'Note' })
+  })
+
+  it('collapses a positional run on a braceless element', async ({ expect }) => {
+    const { changeModel, read, parsedElement } = await testDoc(
+      expect,
+      `${SPEC_WITH_ACTOR}
+      model {
+        customer = actor 'Customer' 'Interacts' 'REST'
+      }`,
+    )
+    await changeModel({ change: { op: 'change-element-property', target: 'customer' as any, title: 'Renamed' } })
+    const text = read()
+    expect(text).toContain('customer = actor {')
+    const parsed = await parsedElement('customer')
+    expect(parsed?.title).toBe('Renamed')
+    expect(parsed?.summary).toEqual({ txt: 'Interacts' })
+    expect(parsed?.technology).toBe('REST')
   })
 
   it('escapes quotes in written values', async ({ expect }) => {

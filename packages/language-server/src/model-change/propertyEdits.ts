@@ -95,6 +95,33 @@ export function updateTitleProperty(node: PropsBodyNode, title: string): TextEdi
   )
 }
 
+export function updateSummaryProperty(node: PropsBodyNode, summary: string): TextEdit {
+  const existing = findExistingProperty(node, 'summary')
+
+  const summaryOut = withctx({ summary })(
+    ops.props.summaryProperty(),
+  )
+
+  if (existing) {
+    return TextEdit.replace(
+      existing.$cstNode.range,
+      printOperation(summaryOut),
+    )
+  }
+
+  return TextEdit.insert(
+    findInsertPosition(
+      node,
+      body =>
+        body.tags?.$cstNode?.range.end
+          ?? body.$cstNode?.range.start,
+    ),
+    materialize(
+      doubleIndent(summaryOut),
+    ).trimEnd(),
+  )
+}
+
 export function updateTechnologyProperty(node: PropsBodyNode, technology: string): TextEdit {
   const existing = findExistingProperty(node, 'technology')
   const out = withctx({ technology })(ops.props.technologyProperty())

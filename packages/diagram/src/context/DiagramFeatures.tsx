@@ -11,6 +11,12 @@ const FeatureNames = [
    * Enabled if editor available and has `applySemanticLayout` method
    */
   'AISemanticLayout',
+  /**
+   * Enabled if editor available and has `handleModelChange` method.
+   * Model-editing affordances (property pencils, tag editor) MUST be gated on
+   * this — a port without `handleModelChange` rejects every model change.
+   */
+  'ModelChanges',
   'ReadOnly',
   'FocusMode',
   'NavigateTo',
@@ -50,6 +56,10 @@ export const DefaultFeatures: EnabledFeatures = {
    * Enabled if editor has `applySemanticLayout` method
    */
   enableAISemanticLayout: false,
+  /**
+   * Enabled if editor has `handleModelChange` method
+   */
+  enableModelChanges: false,
   enableReadOnly: true,
   enableCompareWithLatest: false,
   enableControls: false,
@@ -123,6 +133,19 @@ DiagramFeatures.Overlays = ({ children }: PropsWithChildren) => {
 
 export function useEnabledFeatures(): EnabledFeatures {
   return useContext(DiagramFeaturesContext)
+}
+
+/**
+ * True when model-editing affordances (property pencils, tag editor) may be shown.
+ *
+ * Read-only is not enough on its own: `DiagramFeatures.Overlays` deliberately does
+ * NOT force read-only, and hosts such as vscode-preview mount an editor port that
+ * implements `handleChange` but not `handleModelChange`. Showing the affordances
+ * there would produce edits that always fail.
+ */
+export function useCanEditModel(): boolean {
+  const { enableReadOnly, enableModelChanges } = useEnabledFeatures()
+  return !enableReadOnly && enableModelChanges
 }
 
 export type IfEnabledProps = PropsWithChildren<{

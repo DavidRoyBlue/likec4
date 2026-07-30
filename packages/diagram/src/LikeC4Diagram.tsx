@@ -152,6 +152,7 @@ export function LikeC4Diagram<A extends Any = Any>({
                 enableFitView: fitView,
                 enableEditor: hasEditor,
                 enableAISemanticLayout: hasEditor && !!editor.applySemanticLayout,
+                enableModelChanges: hasEditor && !!editor.handleModelChange,
                 enableReadOnly: readonly,
                 enableFocusMode,
                 enableNavigateTo: !!onNavigateTo,

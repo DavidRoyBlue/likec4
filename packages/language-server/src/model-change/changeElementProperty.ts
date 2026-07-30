@@ -6,6 +6,7 @@ import { type ParsedLikeC4LangiumDocument, ast } from '../ast'
 import type { LikeC4Services } from '../module'
 import {
   updateDescriptionProperty,
+  updateSummaryProperty,
   updateTags,
   updateTechnologyProperty,
   updateTitleProperty,
@@ -36,29 +37,86 @@ function laterPosition(a: Position, b: Position): Position {
 }
 
 /**
- * Positional title handling: grammar allows `sys = system 'Title' { ... }`
- * where the positional string OVERRIDES any body `title` property (see
- * ModelParser Base.ts:598). Editing the title must therefore DELETE the
- * positional literal, then upsert the body property.
+ * Positional strings on the element declaration line, e.g.
+ * `customer = actor 'Title' 'Summary' 'Technology'`.
  *
- * Grammar assigns positional strings as `props+=String` (like-c4.langium:126-138),
- * so `ast.Element.props` is `Array<string>` — a plain string, not an AST node with
- * `$cstNode`. The CST node for the first positional entry must be recovered via
- * `findNodeForProperty(elementAst.$cstNode, 'props', 0)`. The deletion range is
- * widened to start at the end of whichever of `kind`/`name` sits immediately
- * before it, so the stray separating space is removed too.
+ * The grammar (like-c4.langium:126-138) allows up to FOUR of them, nested so
+ * that a slot can only exist when every preceding slot exists. ModelParser
+ * (ModelParser.ts:96-109) maps them as:
+ *
+ *   props[0] → title, props[1] → summary, props[2] → technology,
+ *   props[3] → tags (parsed for Structurizr compatibility, IGNORED by LikeC4)
+ *
+ * and feeds them to `parseBaseProps` as the `override` argument — meaning each
+ * positional takes PRECEDENCE over the matching body property (Base.ts:579-616).
+ *
+ * Two consequences drive the handling below:
+ *  - deleting only `props[0]` is unsound: the run shifts left and the old
+ *    SUMMARY is promoted into the title slot, silently overriding the body
+ *    `title` that was just written;
+ *  - a body `technology` is silently shadowed whenever `props[2]` exists.
+ *
+ * So as soon as an edit touches a property a positional would shadow, the WHOLE
+ * run is removed and every displaced value is re-emitted as a body property
+ * (via the generators' ops printers — never hand-rolled strings).
+ *
+ * Body `description` is never shadowed (slot 1 is `summary`, not `description`),
+ * and tags are never shadowed (slot 3 is ignored by LikeC4), so those edits keep
+ * the positional run untouched.
  */
-function removePositionalTitle(elementAst: ast.Element): TextEdit | undefined {
-  if (!elementAst.props || elementAst.props.length === 0) {
+type PositionalValues = {
+  title?: string
+  summary?: string
+  technology?: string
+}
+
+/**
+ * True when the change writes a body property that a still-present positional
+ * would override.
+ */
+function isShadowedByPositionals(props: string[], change: ModelChange.ChangeElementProperty): boolean {
+  return (change.title !== undefined && props.length >= 1)
+    || (change.technology !== undefined && props.length >= 3)
+}
+
+/**
+ * Values that must be re-emitted as body properties once the positional run is
+ * gone. A slot the change itself overwrites is skipped — the change wins.
+ *
+ * NOTE: `props[3]` (Structurizr tag list) has no LikeC4 counterpart and is
+ * dropped with the run; it never contributed to the parsed model.
+ */
+function displacedPositionals(props: string[], change: ModelChange.ChangeElementProperty): PositionalValues {
+  const [title, summary, technology] = props
+  return {
+    ...(change.title === undefined && title !== undefined && { title }),
+    ...(summary !== undefined && { summary }),
+    ...(change.technology === undefined && technology !== undefined && { technology }),
+  }
+}
+
+/**
+ * Grammar assigns positional strings as `props+=String`, so `ast.Element.props`
+ * is `Array<string>` — plain strings, not AST nodes with `$cstNode`. Their CST
+ * nodes must be recovered via `findNodeForProperty(cst, 'props', index)`.
+ *
+ * The deletion range spans the ENTIRE run and is widened to start at the end of
+ * whichever of `kind`/`name` sits immediately before it, so the stray separating
+ * space is removed too.
+ */
+function removePositionalRun(elementAst: ast.Element): TextEdit | undefined {
+  const count = elementAst.props?.length ?? 0
+  if (count === 0) {
     return undefined
   }
-  const literalNode = findNodeForProperty(elementAst.$cstNode, 'props', 0)
-  if (!literalNode) {
+  const firstNode = findNodeForProperty(elementAst.$cstNode, 'props', 0)
+  const lastNode = findNodeForProperty(elementAst.$cstNode, 'props', count - 1)
+  if (!firstNode || !lastNode) {
     return undefined
   }
   const kindNode = findNodeForProperty(elementAst.$cstNode, 'kind')
   const nameNode = findNodeForProperty(elementAst.$cstNode, 'name')
-  let start = literalNode.range.start
+  let start = firstNode.range.start
   if (kindNode && nameNode) {
     start = laterPosition(kindNode.range.end, nameNode.range.end)
   } else if (kindNode) {
@@ -66,7 +124,7 @@ function removePositionalTitle(elementAst: ast.Element): TextEdit | undefined {
   } else if (nameNode) {
     start = nameNode.range.end
   }
-  return TextEdit.del({ start, end: literalNode.range.end })
+  return TextEdit.del({ start, end: lastNode.range.end })
 }
 
 /**
@@ -78,6 +136,7 @@ function removePositionalTitle(elementAst: ast.Element): TextEdit | undefined {
 function bracelessBodyEdit(
   elementAst: ast.Element,
   change: ModelChange.ChangeElementProperty,
+  displaced: PositionalValues,
 ): TextEdit {
   const cst = nonNullable(elementAst.$cstNode, 'element cst')
   const indentUnit = ' '.repeat(cst.range.start.character)
@@ -89,11 +148,16 @@ function bracelessBodyEdit(
   if (tagsToAdd.length > 0) {
     parts.push(printOperation(withctx({ tags: tagsToAdd }, ops.props.tagsProperty())))
   }
-  if (change.title !== undefined) {
-    parts.push(printOperation(withctx({ title: change.title }, ops.props.titleProperty())))
+  const title = change.title ?? displaced.title
+  if (title !== undefined) {
+    parts.push(printOperation(withctx({ title }, ops.props.titleProperty())))
   }
-  if (change.technology !== undefined) {
-    parts.push(printOperation(withctx({ technology: change.technology }, ops.props.technologyProperty())))
+  if (displaced.summary !== undefined) {
+    parts.push(printOperation(withctx({ summary: displaced.summary }, ops.props.summaryProperty())))
+  }
+  const technology = change.technology ?? displaced.technology
+  if (technology !== undefined) {
+    parts.push(printOperation(withctx({ technology }, ops.props.technologyProperty())))
   }
   if (change.description !== undefined) {
     parts.push(printOperation(withctx({ description: change.description }, ops.props.descriptionProperty())))
@@ -116,31 +180,41 @@ export function changeElementProperty(
   const warnings = collectExtendTagWarnings(services, doc, change)
   const fallbackRange = nonNullable(elementAst.$cstNode, 'element cst').range
 
+  const positionals = elementAst.props ?? []
+  // Only touch the positional run when it would shadow what we are about to write.
+  const dropPositionals = isShadowedByPositionals(positionals, change)
+    ? removePositionalRun(elementAst)
+    : undefined
+  // If the run survives (no CST), leave the values where they are — re-emitting
+  // them would duplicate, not displace.
+  const displaced = dropPositionals ? displacedPositionals(positionals, change) : {}
+
   if (!elementAst.body) {
     const edits: TextEdit[] = []
-    if (change.title !== undefined) {
-      const dropPositional = removePositionalTitle(elementAst)
-      if (dropPositional) {
-        edits.push(dropPositional)
-      }
+    if (dropPositionals) {
+      edits.push(dropPositionals)
     }
-    edits.push(bracelessBodyEdit(elementAst, change))
+    edits.push(bracelessBodyEdit(elementAst, change, displaced))
     return { edits, modifiedRange: includeRanges(edits) ?? fallbackRange, warnings }
   }
 
   const edits: TextEdit[] = []
-  if (change.title !== undefined) {
-    const dropPositional = removePositionalTitle(elementAst)
-    if (dropPositional) {
-      edits.push(dropPositional)
-    }
-    edits.push(updateTitleProperty(elementAst, change.title))
+  if (dropPositionals) {
+    edits.push(dropPositionals)
+  }
+  const title = change.title ?? displaced.title
+  if (title !== undefined) {
+    edits.push(updateTitleProperty(elementAst, title))
+  }
+  if (displaced.summary !== undefined) {
+    edits.push(updateSummaryProperty(elementAst, displaced.summary))
   }
   if (change.description !== undefined) {
     edits.push(...updateDescriptionProperty(elementAst, change.description))
   }
-  if (change.technology !== undefined) {
-    edits.push(updateTechnologyProperty(elementAst, change.technology))
+  const technology = change.technology ?? displaced.technology
+  if (technology !== undefined) {
+    edits.push(updateTechnologyProperty(elementAst, technology))
   }
   if (change.tag !== undefined) {
     edits.push(...updateTags(elementAst, change.tag))

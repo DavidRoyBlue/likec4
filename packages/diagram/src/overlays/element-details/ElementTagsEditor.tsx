@@ -14,7 +14,7 @@ import {
 } from '@mantine/core'
 import { IconPlus, IconX } from '@tabler/icons-react'
 import { ElementTag } from '../../base-primitives/element/ElementTags'
-import { useEnabledFeatures } from '../../context/DiagramFeatures'
+import { useCanEditModel } from '../../context/DiagramFeatures'
 import { useDiagram } from '../../hooks/useDiagram'
 
 export type ElementTagsEditorProps = {
@@ -36,18 +36,21 @@ export type ElementTagsEditorProps = {
 /**
  * Renders element tags as removable chips, plus an add-combobox listing
  * specification tags not yet applied to the element. Falls back to plain
- * (non-removable) chips when the diagram is read-only.
+ * (non-removable) chips when the diagram is read-only OR the editor port does not
+ * support model changes (see `useCanEditModel`).
  */
 export function ElementTagsEditor({ target, tags, specTags, onTagClick }: ElementTagsEditorProps) {
-  const { enableReadOnly } = useEnabledFeatures()
+  const canEdit = useCanEditModel()
   const diagram = useDiagram()
   const combobox = useCombobox({
     onDropdownClose: () => combobox.resetSelectedOption(),
   })
 
-  if (enableReadOnly) {
+  // Read-only rendering must match what the details card showed before element
+  // editing existed: plain chips, no "add" affordance, no empty-state placeholder.
+  if (!canEdit) {
     return (
-      <Flex gap={4} flex={1} wrap="wrap">
+      <Flex gap={4} flex={1} mt={6} wrap="wrap">
         {tags.map((tag) => (
           <ElementTag
             key={tag}
@@ -61,7 +64,6 @@ export function ElementTagsEditor({ target, tags, specTags, onTagClick }: Elemen
               : undefined}
           />
         ))}
-        {tags.length === 0 && <Badge radius={'sm'} size="sm" fw={600} color="gray">—</Badge>}
       </Flex>
     )
   }

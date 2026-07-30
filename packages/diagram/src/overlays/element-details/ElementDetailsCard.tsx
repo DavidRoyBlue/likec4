@@ -47,7 +47,7 @@ import { type PropsWithChildren, type SyntheticEvent, useCallback, useRef, useSt
 import { clamp, entries, isNullish, keys, map, only, partition, pipe } from 'remeda'
 import { Markdown } from '../../base-primitives'
 import { Link } from '../../components/Link'
-import { DiagramFeatures, IconRenderer, IfEnabled, useEnabledFeatures } from '../../context'
+import { DiagramFeatures, IconRenderer, IfEnabled, useCanEditModel } from '../../context'
 import { useCallbackRef, useUpdateEffect } from '../../hooks'
 import { useCurrentViewModel } from '../../hooks/useCurrentViewModel'
 import { useDiagram } from '../../hooks/useDiagram'
@@ -120,7 +120,8 @@ export function ElementDetailsCard({
     key: `likec4:element-details:active-tab`,
     defaultValue: 'Properties',
   })
-  const { enableReadOnly } = useEnabledFeatures()
+  // Empty rows are only worth showing when they can actually be filled in
+  const canEditModel = useCanEditModel()
   const diagram = useDiagram()
   const viewModel = useCurrentViewModel()
   const nodeModel = fromNode ? viewModel.findNode(fromNode) : viewModel.findNodeWithElement(fqn)
@@ -439,7 +440,7 @@ export function ElementDetailsCard({
                         <Markdown value={elementModel.description} emptyText="no description" />
                       </EditableProperty>
                     </>
-                    {(elementModel.technology || !enableReadOnly) && (
+                    {(elementModel.technology || canEditModel) && (
                       <ElementProperty title="technology">
                         <EditableProperty
                           target={elementModel.id}
