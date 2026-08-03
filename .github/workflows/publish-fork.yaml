@@ -1,0 +1,44 @@
+name: publish-fork
+
+# Publishes all public workspace packages to GitHub Packages under the fork owner's
+# scope (see devops/prepare-fork-publish.mjs). Runs only in the DavidRoyBlue fork.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - command-center
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  NODE_ENV: production
+  FORCE_COLOR: true
+  DO_NOT_TRACK: '1'
+
+jobs:
+  publish:
+    name: 📦 GitHub Packages
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04-arm
+    if: ${{ github.repository == 'DavidRoyBlue/likec4' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: 🛠️ bootstrap
+        uses: ./.github/actions/bootstrap
+
+      - name: ⚙️ build
+        run: pnpm ci:build
+
+      - name: 🏷️ prepare packages for GitHub Packages
+        run: node devops/prepare-fork-publish.mjs
+
+      - name: 📦 publish
+        run: |
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> "$HOME/.npmrc"
+          pnpm publish -r --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
