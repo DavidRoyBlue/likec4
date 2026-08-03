@@ -6,8 +6,8 @@
  *   - `likec4`     -> `@<owner>/likec4`
  *   - `@likec4/x`  -> `@<owner>/x`
  *   - version      -> `<version>-<tag>.<build>` (e.g. `1.59.2-cc.7`)
- *   - inter-package dependency keys renamed; `workspace:` ranges kept (pnpm resolves
- *     them to the stamped versions on publish), other ranges pinned to stamped versions
+ *   - inter-package dependency keys renamed and pinned to the stamped versions
+ *     (including `workspace:` ranges — pnpm cannot resolve those for renamed packages)
  *   - `repository.url` pointed at the fork (GitHub Packages links packages via this field)
  *   - `publishConfig.registry` set to GitHub Packages, `publishConfig.access` removed
  *     (visibility follows the repository)
@@ -106,10 +106,13 @@ export function transformManifest(pkg, { renames, versions, repositoryUrl }) {
   for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
     const deps = next[field]
     if (!deps) continue
-    for (const [name, range] of Object.entries(deps)) {
+    for (const name of Object.keys(deps)) {
       if (!renames.has(name)) continue
+      // pnpm cannot resolve `workspace:` ranges for renamed packages (it resolves against
+      // the installed lockfile, which knows them by their original names), so pin every
+      // renamed dependency to the stamped version ourselves
       delete deps[name]
-      deps[renames.get(name)] = range.startsWith('workspace:') ? range : versions.get(name)
+      deps[renames.get(name)] = versions.get(name)
     }
   }
   next.repository = { ...(typeof next.repository === 'object' ? next.repository : {}), type: 'git', url: repositoryUrl }

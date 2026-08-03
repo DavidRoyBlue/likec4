@@ -46,12 +46,12 @@ test('transforms manifest: name, version, deps, repository, publishConfig', () =
 
   assert.equal(next.name, '@davidroyblue/likec4')
   assert.equal(next.version, '1.59.2-cc.7')
-  // workspace ranges kept (pnpm resolves them at publish), plain ranges pinned
-  assert.equal(next.dependencies['@davidroyblue/core'], 'workspace:*')
+  // every renamed dep is pinned — pnpm cannot resolve workspace: ranges for renamed packages
+  assert.equal(next.dependencies['@davidroyblue/core'], '1.59.2-cc.7')
   assert.equal(next.dependencies['@davidroyblue/icons'], '1.46.4-cc.7')
   assert.equal(next.dependencies['react'], '^19.0.0')
   assert.equal('@likec4/core' in next.dependencies, false)
-  assert.equal(next.devDependencies['@davidroyblue/core'], 'workspace:*')
+  assert.equal(next.devDependencies['@davidroyblue/core'], '1.59.2-cc.7')
   assert.equal(next.repository.url, 'git+https://github.com/DavidRoyBlue/likec4.git')
   assert.equal(next.repository.directory, 'packages/likec4')
   assert.equal(next.publishConfig.registry, 'https://npm.pkg.github.com')
