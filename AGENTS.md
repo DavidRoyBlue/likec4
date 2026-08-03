@@ -4,6 +4,14 @@ AGENTS.md is the canonical shared repository instruction file. Tool-specific fil
 
 LikeC4 is an architecture-as-code tool for visualizing software architecture. It provides a DSL for describing architecture, a language server, CLI, VSCode extension, and web-based diagram visualization.
 
+## Fork notice (DavidRoyBlue/likec4)
+
+This repository is a fork consumed by the CommandCenter app. Read `docs/fork-publishing.md` before touching branches or the publish setup.
+
+- `main` tracks upstream plus fork features; `command-center` is the publish branch — every push to it publishes all public packages to GitHub Packages as `@davidroyblue/*` with `-cc.<run>` versions (`.github/workflows/publish-fork.yaml`, `devops/prepare-fork-publish.mjs`). Source package names stay `@likec4/*`; renaming happens only in CI.
+- Release a new build with `git push origin main:command-center`. Never rename packages in source or edit versions for fork publishing.
+- Keep this section and the files above out of any PR intended for upstream `likec4/likec4`.
+
 ## Project Structure & Module Organization
 
 - Monorepo managed by `pnpm` workspaces and `turbo`.
