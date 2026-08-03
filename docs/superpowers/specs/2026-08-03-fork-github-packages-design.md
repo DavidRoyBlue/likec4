@@ -33,9 +33,11 @@ Run only in CI, after build, before publish. For each public workspace package:
 - Stamp version as `<current>-cc.<run>` where `<run>` is `GITHUB_RUN_NUMBER`
   (e.g. `1.59.2-cc.7`; `@likec4/icons` keeps its own base version).
 - Rewrite inter-package dependency keys in `dependencies`, `devDependencies`,
-  `peerDependencies`, and `optionalDependencies` to the renamed names. `workspace:*`
-  ranges are kept (pnpm replaces them with the stamped exact version on publish);
-  non-workspace ranges are replaced with the stamped exact version.
+  `peerDependencies`, and `optionalDependencies` to the renamed names, pinning every
+  renamed dependency to the stamped exact version. `workspace:` ranges cannot be left
+  for pnpm to resolve: pnpm resolves them against the installed lockfile, which knows
+  the packages only by their original names
+  (`ERR_PNPM_CANNOT_RESOLVE_WORKSPACE_PROTOCOL`).
 - Set `repository.url` to the fork (GitHub Packages links packages to the repo via this
   field and can reject mismatches).
 - Set `publishConfig.registry` to `https://npm.pkg.github.com` and delete
