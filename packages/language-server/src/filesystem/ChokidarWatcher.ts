@@ -7,6 +7,7 @@ import { basename } from 'node:path'
 import PQueue from 'p-queue'
 import { logger as mainLogger } from '../logger'
 import type { LikeC4SharedServices } from '../module'
+import { handleFileSystemEvent } from './handleFileSystemEvent'
 import { isManualLayoutFile } from './LikeC4ManualLayouts'
 import type { FileSystemWatcher, FileSystemWatcherModuleContext } from './types'
 import { hasLikeC4Ext, insideNodeModulesOrRepo } from './utils'
@@ -113,58 +114,20 @@ export class ChokidarFileSystemWatcher implements FileSystemWatcher {
     })
   }
 
+  // Routing for both `add`/`change` and `unlink` delegates to the shared
+  // `handleFileSystemEvent`, so this class only owns chokidar wiring
+  // (globbing, queueing, directory removal) and not the file-kind logic.
+  // The asymmetry between the two — config removal reloads all projects,
+  // config add/change only re-registers the one file — lives in
+  // `handleFileSystemEvent` and must stay intact.
   private async onAddOrChange(path: string) {
-    const workspace = this.services.workspace
-    const filename = basename(path)
-    const uri = URI.file(path)
-    switch (true) {
-      case isLikeC4Config(filename): {
-        logger.debug`project config changed: ${path}`
-        workspace.ManualLayouts.clearCaches()
-        await workspace.ProjectsManager.registerConfigFile(uri)
-        break
-      }
-      case isManualLayoutFile(filename): {
-        logger.debug`manual layout file changed: ${path}`
-        await workspace.ManualLayouts.handleFileSystemUpdate({ update: uri })
-        break
-      }
-      case hasLikeC4Ext(filename): {
-        logger.debug`file changed: ${path}`
-        await workspace.DocumentBuilder.update([uri], [])
-        break
-      }
-      default: {
-        logger.warn`Unknown file change: ${path}`
-      }
-    }
+    logger.debug`file changed: ${path}`
+    await handleFileSystemEvent(this.services, { kind: 'change', path })
   }
 
   private async onRemove(path: string) {
-    const workspace = this.services.workspace
-    const filename = basename(path)
-    const uri = URI.file(path)
-    switch (true) {
-      case isLikeC4Config(filename): {
-        logger.debug`project file removed: ${path}`
-        workspace.ManualLayouts.clearCaches()
-        await workspace.ProjectsManager.reloadProjects()
-        break
-      }
-      case hasLikeC4Ext(filename): {
-        logger.debug`file removed: ${path}`
-        await workspace.DocumentBuilder.update([], [uri])
-        break
-      }
-      case isManualLayoutFile(filename): {
-        logger.debug`manual layout file removed: ${path}`
-        await workspace.ManualLayouts.handleFileSystemUpdate({ delete: uri })
-        break
-      }
-      default: {
-        logger.warn`Unknown file removal: ${path}`
-      }
-    }
+    logger.debug`file removed: ${path}`
+    await handleFileSystemEvent(this.services, { kind: 'unlink', path })
   }
 
   private async onRemoveDir(path: string) {

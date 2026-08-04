@@ -36,8 +36,8 @@ Use npm aliases so application code keeps importing the real package names:
 }
 ```
 
-Only alias the packages the app imports directly. Transitive dependencies already point
-at `@davidroyblue/*` and resolve through the scoped registry mapping automatically.
+See [Consuming: alias every package, not just the ones you import](#consuming-alias-every-package-not-just-the-ones-you-import)
+below — aliasing only the packages the app imports directly is not enough.
 
 The React bindings and the Vite plugin ship inside the `likec4` package — import them
 from the `likec4/react` and `likec4/vite-plugin` subpaths (there are no separate
@@ -49,6 +49,18 @@ A `^1.59.2-cc.0` range matches every `1.59.2-cc.N` publish but **not** `1.59.3-c
 semver only matches prereleases of the same base version. After rebasing the fork onto a
 new upstream release, bump the ranges in the consumer app accordingly. Pin an exact
 version (`1.59.2-cc.7`) for full reproducibility.
+
+## Consuming: alias every package, not just the ones you import
+
+`prepare-fork-publish.mjs` rewrites manifests only. Built `dist/` output keeps
+real `@likec4/*` specifiers, so a published `@davidroyblue/diagram` still does
+`import ... from '@likec4/core'` at runtime. Consumers must therefore alias
+**every** `@likec4/*` package in the transitive graph:
+
+    "@likec4/core": "npm:@davidroyblue/core@^1.59.2-cc.0"
+
+Missing one does not fail loudly — upstream packages of the same name exist on
+npmjs, so the resolver silently mixes upstream code into a fork install.
 
 ## Publishing a new build
 
