@@ -9,6 +9,7 @@ import {
 import { configureLogger, getConsoleSink, getTextFormatter, rootLogger } from '@likec4/log'
 import { URI } from 'langium'
 import { basename } from 'pathe'
+import { withTrailingSlash } from 'ufo'
 import { createFromSources } from '../common/createFromSources'
 import { type LikeC4Langium, LikeC4 } from '../common/LikeC4'
 import type { FromWorkspaceOptions, InitOptions } from '../common/options'
@@ -78,7 +79,10 @@ export async function fromHost(options: {
     ...(options.fileSystemWatcher && { fileSystemWatcher: options.fileSystemWatcher }),
     ...WithLikeC4ManualLayouts,
   })
-  const rootUri = URI.file(options.workspacePath).toString()
+  // Normalize with a trailing slash, matching node's `fromWorkspace` — LSP/workspace
+  // consumers resolve paths consistently that way (CI vs local), and a bare prefix
+  // check without it can false-match a sibling directory (`/foo/bar` vs `/foo/barbaz`).
+  const rootUri = withTrailingSlash(URI.file(options.workspacePath).toString())
   const workspace = { name: basename(options.workspacePath), uri: rootUri }
   const manager = langium.shared.workspace.WorkspaceManager
   manager.initialize({ capabilities: {}, processId: null, rootUri, workspaceFolders: [workspace] })
