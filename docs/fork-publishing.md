@@ -9,6 +9,17 @@ automatically on every push to the `command-center` branch (and manually via the
 Versions are stamped `<base>-cc.<run>` per publish, e.g. `1.59.2-cc.7`. The run number
 comes from the workflow run, so every publish gets a unique, sortable version.
 
+## Branch model
+
+- `main` — development branch: upstream LikeC4 plus fork features. Pushing to it
+  publishes nothing.
+- `command-center` — publish trigger only: every push to it runs the `publish-fork`
+  workflow and publishes all public packages. Never commit to it directly; fast-forward
+  it from `main` when releasing (`git push origin main:command-center`).
+
+The published packages are therefore built from whatever commit `command-center` pointed
+at on its last push — keep it in sync with `main` so published code matches source.
+
 ## Setup in a consumer app (pnpm)
 
 ### 1. Authenticate
